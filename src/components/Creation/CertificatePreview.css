@@ -1,0 +1,188 @@
+/* Certificate Preview Styles */
+.certificate-container {
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  min-height: 100vh;
+  padding: 2rem 1rem;
+  overflow-x: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.certificate-paper {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+  border: 2px solid #e0e0e0;
+}
+
+.certificate-paper:hover {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+  transition: box-shadow 0.3s ease;
+}
+
+.draggable-text {
+  position: absolute;
+  cursor: move;
+  user-select: text;
+  transition: all 0.2s ease;
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.draggable-text:hover {
+  background-color: rgba(25, 118, 210, 0.05);
+  outline: 1px dashed rgba(25, 118, 210, 0.3);
+}
+
+.draggable-text.selected {
+  background-color: rgba(25, 118, 210, 0.1);
+  outline: 2px solid #1976d2;
+}
+
+.content-editable {
+  outline: none;
+  text-align: center;
+  cursor: text;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  min-height: 1.2em;
+  padding: 2px;
+  border-radius: 2px;
+}
+
+.content-editable:focus {
+  background-color: rgba(25, 118, 210, 0.05);
+  outline: 1px solid #1976d2;
+}
+
+.floating-toolbar {
+  position: absolute;
+  background: #fff;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  padding: 8px;
+  z-index: 9999;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  border: 1px solid #e0e0e0;
+  min-width: fit-content;
+  transform: translateX(-50%);
+}
+
+.floating-toolbar button {
+  background: none;
+  border: none;
+  padding: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #424242;
+  transition: background-color 0.2s ease;
+}
+
+.floating-toolbar button:hover {
+  background-color: #f5f5f5;
+}
+
+.floating-toolbar select {
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  background: #fff;
+  cursor: pointer;
+}
+
+.floating-toolbar input[type="color"] {
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+}
+
+.customization-panel {
+  background: #fff;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  max-height: 80vh;
+  overflow: auto;
+}
+
+.customization-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+.customization-panel::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.customization-panel::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.customization-panel::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .certificate-container {
+    padding: 1rem 0.5rem;
+  }
+  
+  .certificate-paper {
+    max-width: 95vw;
+    min-width: 300px;
+  }
+  
+  .floating-toolbar {
+    flex-wrap: wrap;
+    max-width: 90vw;
+  }
+}
+
+/* Professional Typography */
+.certificate-title {
+  font-family: 'Georgia, serif';
+  font-weight: bold;
+  color: #1a237e;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.certificate-name {
+  font-family: 'Georgia, serif';
+  font-weight: bold;
+  color: #2c3e50;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.certificate-course {
+  font-family: 'Georgia, serif';
+  font-weight: bold;
+  color: #1976d2;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.certificate-text {
+  font-family: 'Georgia, serif';
+  color: #424242;
+  line-height: 1.4;
+}
+
+.certificate-date {
+  font-family: 'Georgia, serif';
+  color: #616161;
+  font-style: italic;
+}
+
+.certificate-issuer {
+  font-family: 'Georgia, serif';
+  color: #757575;
+  font-size: 0.9em;
+} 
