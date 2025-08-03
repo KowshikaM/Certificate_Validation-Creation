@@ -9,13 +9,17 @@ import {
   InputAdornment, 
   IconButton,
   Alert,
-  Link
+  Link,
+  Checkbox,
+  FormControlLabel
 } from '@mui/material';
 import { 
   Visibility, 
   VisibilityOff, 
   Email, 
   Lock,
+  Person,
+  Business,
   School,
   AutoAwesome
 } from '@mui/icons-material';
@@ -53,7 +57,7 @@ const StyledPaper = styled(Paper)(({ theme }) => ({
   background: 'rgba(255, 255, 255, 0.95)',
   backdropFilter: 'blur(10px)',
   border: '1px solid rgba(255, 255, 255, 0.2)',
-  maxWidth: 400,
+  maxWidth: 500,
   width: '100%',
   position: 'relative',
   zIndex: 1,
@@ -100,14 +104,20 @@ const StyledTextField = styled(TextField)(({ theme }) => ({
   },
 }));
 
-const LoginPage = () => {
+const SignupPage = () => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    organization: '',
     email: '',
     password: '',
+    confirmPassword: '',
   });
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -121,21 +131,35 @@ const LoginPage = () => {
     e.preventDefault();
     setError('');
     
-    // Simple validation
-    if (!formData.email || !formData.password) {
-      setError('Please fill in all fields');
+    // Validation
+    if (!formData.firstName || !formData.lastName || !formData.organization || !formData.email || !formData.password) {
+      setError('Please fill in all required fields');
       return;
     }
 
-    // Simulate login process
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+
+    if (formData.password.length < 8) {
+      setError('Password must be at least 8 characters long');
+      return;
+    }
+
+    if (!acceptedTerms) {
+      setError('Please accept the terms and conditions');
+      return;
+    }
+
+    // Simulate signup process
     try {
-      // Here you would typically make an API call
-      console.log('Login attempt:', formData);
+      console.log('Signup attempt:', formData);
       
       // For demo purposes, navigate to dashboard
       navigate('/dashboard');
     } catch (err) {
-      setError('Login failed. Please check your credentials.');
+      setError('Signup failed. Please try again.');
     }
   };
 
@@ -153,7 +177,7 @@ const LoginPage = () => {
             Professional Certificate Generator
           </Typography>
           <Typography variant="h6" sx={{ fontWeight: 600, color: '#2d3748' }}>
-            Welcome Back
+            Create Your Account
           </Typography>
         </Box>
 
@@ -164,6 +188,44 @@ const LoginPage = () => {
         )}
 
         <form onSubmit={handleSubmit}>
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <StyledTextField
+              label="First Name"
+              name="firstName"
+              value={formData.firstName}
+              onChange={handleInputChange}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Person sx={{ color: '#667eea' }} />
+                  </InputAdornment>
+                ),
+              }}
+            />
+            <StyledTextField
+              label="Last Name"
+              name="lastName"
+              value={formData.lastName}
+              onChange={handleInputChange}
+            />
+          </Box>
+
+          <StyledTextField
+            fullWidth
+            label="Organization Name"
+            name="organization"
+            value={formData.organization}
+            onChange={handleInputChange}
+            margin="normal"
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <Business sx={{ color: '#667eea' }} />
+                </InputAdornment>
+              ),
+            }}
+          />
+
           <StyledTextField
             fullWidth
             label="Email Address"
@@ -208,22 +270,77 @@ const LoginPage = () => {
             }}
           />
 
+          <StyledTextField
+            fullWidth
+            label="Confirm Password"
+            name="confirmPassword"
+            type={showConfirmPassword ? 'text' : 'password'}
+            value={formData.confirmPassword}
+            onChange={handleInputChange}
+            margin="normal"
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <Lock sx={{ color: '#667eea' }} />
+                </InputAdornment>
+              ),
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    edge="end"
+                  >
+                    {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+          />
+
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={acceptedTerms}
+                onChange={(e) => setAcceptedTerms(e.target.checked)}
+                sx={{
+                  color: '#667eea',
+                  '&.Mui-checked': {
+                    color: '#667eea',
+                  },
+                }}
+              />
+            }
+            label={
+              <Typography variant="body2" color="text.secondary">
+                I agree to the{' '}
+                <Link href="#" sx={{ color: '#667eea', textDecoration: 'none' }}>
+                  Terms of Service
+                </Link>
+                {' '}and{' '}
+                <Link href="#" sx={{ color: '#667eea', textDecoration: 'none' }}>
+                  Privacy Policy
+                </Link>
+              </Typography>
+            }
+            sx={{ mt: 2, mb: 2 }}
+          />
+
           <StyledButton
             type="submit"
             fullWidth
             variant="contained"
-            sx={{ mt: 4, mb: 2 }}
+            sx={{ mt: 2, mb: 2 }}
             startIcon={<AutoAwesome />}
           >
-            Sign In
+            Create Account
           </StyledButton>
 
           <Box sx={{ textAlign: 'center', mt: 3 }}>
             <Typography variant="body2" color="text.secondary">
-              Don't have an account?{' '}
+              Already have an account?{' '}
               <Link 
                 href="#" 
-                onClick={() => navigate('/signup')}
+                onClick={() => navigate('/login')}
                 sx={{ 
                   color: '#667eea', 
                   textDecoration: 'none',
@@ -231,7 +348,7 @@ const LoginPage = () => {
                   '&:hover': { textDecoration: 'underline' }
                 }}
               >
-                Sign up here
+                Sign in here
               </Link>
             </Typography>
           </Box>
@@ -241,4 +358,4 @@ const LoginPage = () => {
   );
 };
 
-export default LoginPage;
+export default SignupPage; 
