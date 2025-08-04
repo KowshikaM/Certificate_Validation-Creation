@@ -40,6 +40,91 @@ import { styled } from '@mui/material/styles';
 import Draggable from 'react-draggable';
 import ContentEditable from 'react-contenteditable';
 
+// SHA-256 encryption function
+const sha256 = async (message) => {
+  const msgBuffer = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hashHex;
+};
+
+// Watermark pattern generator
+const generateWatermarkPattern = (hash, pattern) => {
+  const patterns = {
+    'inside-border': (hash) => {
+      // Create border pattern using hash
+      const chars = hash.substring(0, 16).split('');
+      return chars.map((char, index) => ({
+        char: char.toUpperCase(),
+        x: 20 + (index * 40),
+        y: 20,
+        rotation: index * 15
+      }));
+    },
+    'cross': (hash) => {
+      // Create cross pattern
+      const chars = hash.substring(0, 8).split('');
+      const centerX = 400;
+      const centerY = 350;
+      return [
+        ...chars.map((char, index) => ({
+          char: char.toUpperCase(),
+          x: centerX + (index * 30),
+          y: centerY,
+          rotation: 0
+        })),
+        ...chars.map((char, index) => ({
+          char: char.toUpperCase(),
+          x: centerX,
+          y: centerY + (index * 30),
+          rotation: 90
+        }))
+      ];
+    },
+    'plus': (hash) => {
+      // Create plus pattern
+      const chars = hash.substring(0, 12).split('');
+      const centerX = 400;
+      const centerY = 350;
+      return [
+        ...chars.slice(0, 4).map((char, index) => ({
+          char: char.toUpperCase(),
+          x: centerX + (index * 25),
+          y: centerY,
+          rotation: 0
+        })),
+        ...chars.slice(4, 8).map((char, index) => ({
+          char: char.toUpperCase(),
+          x: centerX,
+          y: centerY + (index * 25),
+          rotation: 90
+        })),
+        ...chars.slice(8, 12).map((char, index) => ({
+          char: char.toUpperCase(),
+          x: centerX + (index * 25),
+          y: centerY + 50,
+          rotation: 0
+        }))
+      ];
+    },
+    'minus': (hash) => {
+      // Create minus pattern
+      const chars = hash.substring(0, 10).split('');
+      const centerX = 400;
+      const centerY = 350;
+      return chars.map((char, index) => ({
+        char: char.toUpperCase(),
+        x: centerX + (index * 30),
+        y: centerY,
+        rotation: 0
+      }));
+    }
+  };
+  
+  return patterns[pattern] ? patterns[pattern](hash) : patterns['cross'](hash);
+};
+
 const StyledContainer = styled(Box)(({ theme }) => ({
   minHeight: '100vh',
   background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)',
@@ -169,14 +254,56 @@ const CertificatePreview = () => {
   const navigate = useNavigate();
   const [certificateData, setCertificateData] = useState(null);
   const [borderImage, setBorderImage] = useState('');
+  const [certificateSize, setCertificateSize] = useState('A4-Horizontal');
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedElement, setSelectedElement] = useState(null);
   const [zoom, setZoom] = useState(1);
 
+  // Define certificate dimensions based on size
+  const getCertificateDimensions = (size) => {
+    const dimensions = {
+      'A4-Horizontal': { width: 800, height: 600 },
+      'A4-Vertical': { width: 600, height: 800 },
+      'A3-Horizontal': { width: 1000, height: 700 },
+      'A3-Vertical': { width: 700, height: 1000 }
+    };
+    return dimensions[size] || dimensions['A4-Horizontal'];
+  };
+
+  // Adjust element positions based on certificate size
+  const getElementPositions = (size) => {
+    const dimensions = getCertificateDimensions(size);
+    const isHorizontal = size.includes('Horizontal');
+    
+    if (isHorizontal) {
+      return {
+        title: { x: (dimensions.width - 400) / 2, y: 60 },
+        intro: { x: (dimensions.width - 300) / 2, y: 140 },
+        name: { x: (dimensions.width - 200) / 2, y: 180 },
+        paragraph: { x: (dimensions.width - 400) / 2, y: 240 },
+        course: { x: (dimensions.width - 300) / 2, y: 280 },
+        date: { x: (dimensions.width - 200) / 2, y: 340 },
+        issuer: { x: (dimensions.width - 240) / 2, y: 380 },
+        seal: { x: dimensions.width * 0.8, y: dimensions.height * 0.5 - 30 },
+      };
+    } else {
+      return {
+        title: { x: (dimensions.width - 400) / 2, y: 80 },
+        intro: { x: (dimensions.width - 300) / 2, y: 180 },
+        name: { x: (dimensions.width - 200) / 2, y: 240 },
+        paragraph: { x: (dimensions.width - 400) / 2, y: 320 },
+        course: { x: (dimensions.width - 300) / 2, y: 380 },
+        date: { x: (dimensions.width - 200) / 2, y: 440 },
+        issuer: { x: (dimensions.width - 240) / 2, y: 500 },
+        seal: { x: dimensions.width * 0.8, y: dimensions.height * 0.6 },
+      };
+    }
+  };
+
   const [elements, setElements] = useState({
     title: {
       text: 'Certificate of Completion',
-      position: { x: 250, y: 60 },
+      position: { x: 200, y: 60 },
       style: { 
         fontSize: 40, 
         fontWeight: 'bold', 
@@ -187,7 +314,7 @@ const CertificatePreview = () => {
     },
     intro: {
       text: 'This is to certify that',
-      position: { x: 300, y: 140 },
+      position: { x: 250, y: 140 },
       style: { 
         fontSize: 24, 
         color: '#424242',
@@ -197,7 +324,7 @@ const CertificatePreview = () => {
     },
     name: {
       text: 'John Doe',
-      position: { x: 320, y: 180 },
+      position: { x: 300, y: 180 },
       style: { 
         fontSize: 32, 
         fontWeight: 'bold', 
@@ -208,7 +335,7 @@ const CertificatePreview = () => {
     },
     paragraph: {
       text: 'has successfully completed the course',
-      position: { x: 250, y: 240 },
+      position: { x: 200, y: 240 },
       style: { 
         fontSize: 24, 
         color: '#424242',
@@ -218,7 +345,7 @@ const CertificatePreview = () => {
     },
     course: {
       text: 'React JS Masterclass',
-      position: { x: 200, y: 280 },
+      position: { x: 250, y: 280 },
       style: { 
         fontSize: 28, 
         fontWeight: 'bold', 
@@ -260,14 +387,43 @@ const CertificatePreview = () => {
     },
   });
 
+  // Watermark state
+  const [watermarkPattern, setWatermarkPattern] = useState(null);
+  const [watermarkHash, setWatermarkHash] = useState('');
+  const [isSaved, setIsSaved] = useState(false);
+
+  // Generate new watermark pattern
+  const generateNewWatermarkPattern = async () => {
+    try {
+      const recipientName = certificateData?.name || 'John Doe';
+      const hash = await sha256(recipientName);
+      
+      // Randomly select a different pattern each time
+      const patterns = ['inside-border', 'cross', 'plus', 'minus'];
+      const randomPattern = patterns[Math.floor(Math.random() * patterns.length)];
+      const pattern = generateWatermarkPattern(hash, randomPattern);
+      
+      return { hash, pattern };
+    } catch (error) {
+      console.error('Error generating watermark:', error);
+      return null;
+    }
+  };
+
   useEffect(() => {
     const savedData = localStorage.getItem('certificateData');
     const savedBorder = localStorage.getItem('certificateBorder');
+    const savedSize = localStorage.getItem('certificateSize');
+    
+    console.log('Loading certificate data:', savedData);
+    console.log('Loading border image:', savedBorder);
+    console.log('Loading certificate size:', savedSize);
     
     if (savedData) {
       const data = JSON.parse(savedData);
       setCertificateData(data);
       
+      // Update elements with the saved certificate data
       setElements(prev => ({
         ...prev,
         title: { ...prev.title, text: data.certificateTitle || 'Certificate of Completion' },
@@ -280,9 +436,49 @@ const CertificatePreview = () => {
     }
     
     if (savedBorder) {
+      console.log('Setting border image:', savedBorder);
       setBorderImage(savedBorder);
     }
+
+    if (savedSize) {
+      console.log('Setting certificate size:', savedSize);
+      setCertificateSize(savedSize);
+      
+      // Update element positions based on the certificate size
+      const newPositions = getElementPositions(savedSize);
+      setElements(prev => {
+        const updatedElements = { ...prev };
+        Object.keys(newPositions).forEach(key => {
+          if (updatedElements[key]) {
+            updatedElements[key] = {
+              ...updatedElements[key],
+              position: newPositions[key]
+            };
+          }
+        });
+        return updatedElements;
+      });
+    }
   }, []);
+
+  // Update element positions when certificate size changes
+  useEffect(() => {
+    if (certificateSize) {
+      const newPositions = getElementPositions(certificateSize);
+      setElements(prev => {
+        const updatedElements = { ...prev };
+        Object.keys(newPositions).forEach(key => {
+          if (updatedElements[key]) {
+            updatedElements[key] = {
+              ...updatedElements[key],
+              position: newPositions[key]
+            };
+          }
+        });
+        return updatedElements;
+      });
+    }
+  }, [certificateSize]);
 
   const handleDrag = useCallback((key, e, data) => {
     setElements((prev) => ({
@@ -321,12 +517,114 @@ const CertificatePreview = () => {
     }));
   };
 
-  const handleDownload = () => {
+  const handleSave = () => {
+    // Save current certificate state
+    const certificateState = {
+      elements,
+      certificateSize,
+      borderImage,
+      certificateData
+    };
+    localStorage.setItem('certificateState', JSON.stringify(certificateState));
+    setIsSaved(true);
+    
+    // Show saved message briefly
+    setTimeout(() => setIsSaved(false), 2000);
+  };
+
+  const handleDownload = async () => {
     setIsGenerating(true);
-    setTimeout(() => {
+    
+    try {
+      // Generate new watermark pattern for this download
+      const watermarkData = await generateNewWatermarkPattern();
+      
+      // Create a canvas to render the certificate with watermark
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const dimensions = getCertificateDimensions(certificateSize);
+      
+      canvas.width = dimensions.width;
+      canvas.height = dimensions.height;
+      
+      // Set background
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, dimensions.width, dimensions.height);
+      
+      // Draw border image if available
+      if (borderImage) {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, dimensions.width, dimensions.height);
+          drawCertificateContent(ctx, dimensions);
+          if (watermarkData) {
+            drawWatermark(ctx, dimensions, watermarkData.pattern);
+          }
+          downloadCanvas(canvas);
+        };
+        img.src = borderImage;
+      } else {
+        // Draw fallback border
+        ctx.strokeStyle = '#667eea';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(10, 10, dimensions.width - 20, dimensions.height - 20);
+        drawCertificateContent(ctx, dimensions);
+        if (watermarkData) {
+          drawWatermark(ctx, dimensions, watermarkData.pattern);
+        }
+        downloadCanvas(canvas);
+      }
+    } catch (error) {
+      console.error('Error generating certificate:', error);
       setIsGenerating(false);
-      console.log('Downloading certificate...');
-    }, 2000);
+    }
+  };
+
+  const drawCertificateContent = (ctx, dimensions) => {
+    // Draw all text elements
+    Object.entries(elements).forEach(([key, element]) => {
+      if (key === 'seal') return; // Skip seal for now
+      
+      ctx.font = `${element.style.fontWeight === 'bold' ? 'bold' : 'normal'} ${element.style.fontSize} ${element.style.fontFamily}`;
+      ctx.fillStyle = element.style.color;
+      ctx.textAlign = element.style.textAlign || 'center';
+      ctx.fillText(element.text, element.position.x, element.position.y);
+    });
+  };
+
+  const drawWatermark = (ctx, dimensions, pattern) => {
+    if (!pattern) return;
+    
+    // Draw watermark with very low opacity and light color
+    ctx.globalAlpha = 0.05; // Much lighter opacity
+    ctx.font = '10px Arial';
+    ctx.fillStyle = '#cccccc'; // Light gray color to match background
+    ctx.textAlign = 'center';
+    
+    pattern.forEach((item) => {
+      ctx.save();
+      ctx.translate(item.x, item.y);
+      ctx.rotate((item.rotation * Math.PI) / 180);
+      ctx.fillText(item.char, 0, 0);
+      ctx.restore();
+    });
+    
+    ctx.globalAlpha = 1.0;
+  };
+
+  const downloadCanvas = (canvas) => {
+    try {
+      const link = document.createElement('a');
+      link.download = `certificate_${Date.now()}.png`;
+      link.href = canvas.toDataURL();
+      link.click();
+      setIsGenerating(false);
+      console.log('Certificate downloaded with watermark');
+    } catch (error) {
+      console.error('Error downloading certificate:', error);
+      setIsGenerating(false);
+    }
   };
 
   const handlePrint = () => {
@@ -385,66 +683,7 @@ const CertificatePreview = () => {
           </Box>
 
           <Grid container spacing={4}>
-            <Grid item xs={12} lg={8}>
-              <Box sx={{ textAlign: 'center' }}>
-                <Paper
-                  elevation={8}
-                  sx={{
-                    width: '100%',
-                    maxWidth: 800,
-                    height: 600,
-                    mx: 'auto',
-                    position: 'relative',
-                    overflow: 'hidden',
-                    background: borderImage ? `url(${borderImage})` : '#fff',
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center',
-                    backgroundRepeat: 'no-repeat',
-                    borderRadius: 3,
-                    border: '2px solid #e0e0e0',
-                    transform: `scale(${zoom})`,
-                    transformOrigin: 'center',
-                  }}
-                >
-                  {Object.entries(elements).map(([key, element]) => (
-                    <Draggable
-                      key={key}
-                      position={element.position}
-                      onStop={(e, data) => handleDrag(key, e, data)}
-                      bounds="parent"
-                    >
-                      <DraggableText
-                        selected={selectedElement === key}
-                        isName={key === 'name'}
-                        isSeal={key === 'seal'}
-                        onClick={() => handleElementClick(key)}
-                      >
-                        <ContentEditable
-                          html={element.text}
-                          onChange={(e) => handleTextChange(key, e)}
-                          tagName="div"
-                          className="content-editable"
-                          style={element.style}
-                        />
-                      </DraggableText>
-                    </Draggable>
-                  ))}
-                </Paper>
-
-                <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', gap: 1 }}>
-                  <IconButton onClick={() => setZoom(Math.max(0.5, zoom - 0.1))}>
-                    <ZoomOut />
-                  </IconButton>
-                  <Typography variant="body2" sx={{ alignSelf: 'center', minWidth: 60 }}>
-                    {Math.round(zoom * 100)}%
-                  </Typography>
-                  <IconButton onClick={() => setZoom(Math.min(2, zoom + 0.1))}>
-                    <ZoomIn />
-                  </IconButton>
-                </Box>
-              </Box>
-            </Grid>
-
+            {/* Left Panel - Controls */}
             <Grid item xs={12} lg={4}>
               <Box sx={{ position: 'sticky', top: 20 }}>
                 <Card sx={{ mb: 3, borderRadius: 3 }}>
@@ -576,6 +815,27 @@ const CertificatePreview = () => {
                     
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                       <Button
+                        variant="outlined"
+                        fullWidth
+                        onClick={handleSave}
+                        disabled={isSaved}
+                        sx={{
+                          borderRadius: 2,
+                          textTransform: 'none',
+                          fontWeight: 600,
+                          py: 1.5,
+                          borderColor: isSaved ? '#4caf50' : '#667eea',
+                          color: isSaved ? '#4caf50' : '#667eea',
+                          '&:hover': {
+                            borderColor: isSaved ? '#45a049' : '#5a6fd8',
+                            backgroundColor: isSaved ? 'rgba(76, 175, 80, 0.04)' : 'rgba(102, 126, 234, 0.04)',
+                          }
+                        }}
+                      >
+                        {isSaved ? '✓ Saved' : 'Save Certificate'}
+                      </Button>
+                      
+                      <Button
                         variant="contained"
                         fullWidth
                         startIcon={<Download />}
@@ -655,9 +915,155 @@ const CertificatePreview = () => {
                       <Typography variant="body2" color="text.secondary">
                         • Use zoom controls for precise editing
                       </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        • Save your progress before downloading
+                      </Typography>
                     </Box>
                   </CardContent>
                 </Card>
+              </Box>
+            </Grid>
+
+            {/* Right Panel - Certificate Preview */}
+            <Grid item xs={12} lg={8}>
+              <Box sx={{ textAlign: 'center' }}>
+                {/* Debug Info */}
+                {process.env.NODE_ENV === 'development' && (
+                  <Box sx={{ mb: 2, p: 2, backgroundColor: '#f5f5f5', borderRadius: 2, fontSize: '12px' }}>
+                    <Typography variant="body2">
+                      Debug Info: Border Image = {borderImage || 'None'}, 
+                      Certificate Data = {certificateData ? 'Loaded' : 'Not Found'},
+                      Size = {certificateSize}
+                    </Typography>
+                  </Box>
+                )}
+                
+                <Box sx={{ 
+                  display: 'flex', 
+                  justifyContent: 'center', 
+                  alignItems: 'center',
+                  minHeight: '600px',
+                  overflow: 'auto',
+                  p: 2,
+                  maxHeight: '70vh',
+                  '&::-webkit-scrollbar': {
+                    width: '8px',
+                    height: '8px',
+                  },
+                  '&::-webkit-scrollbar-track': {
+                    background: '#f1f1f1',
+                    borderRadius: '4px',
+                  },
+                  '&::-webkit-scrollbar-thumb': {
+                    background: '#667eea',
+                    borderRadius: '4px',
+                  },
+                  '&::-webkit-scrollbar-thumb:hover': {
+                    background: '#5a6fd8',
+                  },
+                }}>
+                  <Paper
+                    elevation={8}
+                    sx={{
+                      width: getCertificateDimensions(certificateSize).width,
+                      height: getCertificateDimensions(certificateSize).height,
+                      position: 'relative',
+                      overflow: 'hidden',
+                      background: borderImage ? `url(${borderImage})` : '#fff',
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                      backgroundRepeat: 'no-repeat',
+                      borderRadius: 3,
+                      border: '2px solid #e0e0e0',
+                      transform: `scale(${zoom})`,
+                      transformOrigin: 'center',
+                      boxShadow: '0 10px 30px rgba(0, 0, 0, 0.2)',
+                      backgroundColor: borderImage ? 'transparent' : '#fff',
+                      '&::before': borderImage ? {
+                        content: '""',
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                        zIndex: 0,
+                      } : {},
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {/* Fallback border if no image is selected */}
+                    {!borderImage && (
+                      <Box
+                        sx={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          border: '3px solid #667eea',
+                          borderRadius: 2,
+                          background: 'linear-gradient(135deg, #f8faff 0%, #e8f2ff 100%)',
+                          zIndex: 0,
+                        }}
+                      />
+                    )}
+                    
+                    {Object.entries(elements).map(([key, element]) => (
+                      <Draggable
+                        key={key}
+                        position={element.position}
+                        onStop={(e, data) => handleDrag(key, e, data)}
+                        bounds="parent"
+                      >
+                        <DraggableText
+                          selected={selectedElement === key}
+                          isName={key === 'name'}
+                          isSeal={key === 'seal'}
+                          onClick={() => handleElementClick(key)}
+                          sx={{
+                            zIndex: 1,
+                            position: 'relative',
+                          }}
+                        >
+                          <ContentEditable
+                            html={element.text}
+                            onChange={(e) => handleTextChange(key, e)}
+                            tagName="div"
+                            className="content-editable"
+                            style={{
+                              ...element.style,
+                              textShadow: borderImage ? '0 1px 2px rgba(0,0,0,0.3)' : 'none',
+                              backgroundColor: borderImage ? 'rgba(255, 255, 255, 0.8)' : 'transparent',
+                              padding: borderImage ? '4px 8px' : '0',
+                              borderRadius: borderImage ? '4px' : '0',
+                            }}
+                          />
+                        </DraggableText>
+                      </Draggable>
+                    ))}
+                  </Paper>
+                </Box>
+
+                <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', gap: 1 }}>
+                  <IconButton onClick={() => setZoom(Math.max(0.3, zoom - 0.1))}>
+                    <ZoomOut />
+                  </IconButton>
+                  <Typography variant="body2" sx={{ alignSelf: 'center', minWidth: 60 }}>
+                    {Math.round(zoom * 100)}%
+                  </Typography>
+                  <IconButton onClick={() => setZoom(Math.min(2, zoom + 0.1))}>
+                    <ZoomIn />
+                  </IconButton>
+                </Box>
+
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="body2" color="text.secondary">
+                    Certificate Size: {certificateSize} ({getCertificateDimensions(certificateSize).width} × {getCertificateDimensions(certificateSize).height})
+                  </Typography>
+                </Box>
               </Box>
             </Grid>
           </Grid>
