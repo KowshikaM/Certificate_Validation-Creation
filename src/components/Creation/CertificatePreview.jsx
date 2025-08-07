@@ -34,11 +34,13 @@ import {
   DragIndicator,
   Settings,
   ZoomIn,
-  ZoomOut
+  ZoomOut,
+  Edit // <-- add this
 } from '@mui/icons-material';
 import { styled } from '@mui/material/styles';
 import Draggable from 'react-draggable';
 import ContentEditable from 'react-contenteditable';
+import html2canvas from 'html2canvas'; // <-- add this import
 
 // SHA-256 encryption function
 const sha256 = async (message) => {
@@ -258,6 +260,8 @@ const CertificatePreview = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedElement, setSelectedElement] = useState(null);
   const [zoom, setZoom] = useState(1);
+  const [isEditing, setIsEditing] = useState(true); // <-- add this
+  const certificateRef = useRef(null); // <-- add this ref
 
   // Define certificate dimensions based on size
   const getCertificateDimensions = (size) => {
@@ -373,18 +377,7 @@ const CertificatePreview = () => {
         fontFamily: 'Roboto, sans-serif',
         textAlign: 'center'
       }
-    },
-    seal: {
-      text: 'SEAL',
-      position: { x: 520, y: 280 },
-      style: { 
-        fontSize: 12, 
-        fontWeight: 'bold',
-        color: 'white',
-        fontFamily: 'Roboto, sans-serif',
-        textAlign: 'center'
-      }
-    },
+    }
   });
 
   // Watermark state
@@ -517,7 +510,7 @@ const CertificatePreview = () => {
     }));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => { // <-- make async
     // Save current certificate state
     const certificateState = {
       elements,
@@ -527,58 +520,33 @@ const CertificatePreview = () => {
     };
     localStorage.setItem('certificateState', JSON.stringify(certificateState));
     setIsSaved(true);
-    
+    setIsEditing(false); // <-- disable editing
     // Show saved message briefly
     setTimeout(() => setIsSaved(false), 2000);
+    // Trigger download after save
+    await handleDownload();
   };
 
   const handleDownload = async () => {
     setIsGenerating(true);
-    
     try {
-      // Generate new watermark pattern for this download
-      const watermarkData = await generateNewWatermarkPattern();
-      
-      // Create a canvas to render the certificate with watermark
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      const dimensions = getCertificateDimensions(certificateSize);
-      
-      canvas.width = dimensions.width;
-      canvas.height = dimensions.height;
-      
-      // Set background
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, dimensions.width, dimensions.height);
-      
-      // Draw border image if available
-      if (borderImage) {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => {
-          ctx.drawImage(img, 0, 0, dimensions.width, dimensions.height);
-          drawCertificateContent(ctx, dimensions);
-          if (watermarkData) {
-            drawWatermark(ctx, dimensions, watermarkData.pattern);
-          }
-          downloadCanvas(canvas);
-        };
-        img.src = borderImage;
-      } else {
-        // Draw fallback border
-        ctx.strokeStyle = '#667eea';
-        ctx.lineWidth = 3;
-        ctx.strokeRect(10, 10, dimensions.width - 20, dimensions.height - 20);
-        drawCertificateContent(ctx, dimensions);
-        if (watermarkData) {
-          drawWatermark(ctx, dimensions, watermarkData.pattern);
-        }
-        downloadCanvas(canvas);
+      if (certificateRef.current) {
+        // Wait a tick to ensure watermark is rendered
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const canvas = await html2canvas(certificateRef.current, {
+          useCORS: true,
+          backgroundColor: null,
+          scale: 2,
+        });
+        const link = document.createElement('a');
+        link.download = `certificate_${Date.now()}.png`;
+        link.href = canvas.toDataURL();
+        link.click();
       }
     } catch (error) {
-      console.error('Error generating certificate:', error);
-      setIsGenerating(false);
+      console.error('Error capturing certificate:', error);
     }
+    setIsGenerating(false);
   };
 
   const drawCertificateContent = (ctx, dimensions) => {
@@ -807,13 +775,14 @@ const CertificatePreview = () => {
                   </Card>
                 )}
 
+                {/* Actions Card */}
                 <Card sx={{ borderRadius: 3 }}>
                   <CardContent>
                     <Typography variant="h6" sx={{ fontWeight: 600, mb: 3, color: '#2d3748' }}>
                       Actions
                     </Typography>
-                    
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      {isEditing ? (
                       <Button
                         variant="outlined"
                         fullWidth
@@ -832,70 +801,17 @@ const CertificatePreview = () => {
                           }
                         }}
                       >
-                        {isSaved ? '✓ Saved' : 'Save Certificate'}
+                          {isSaved ? '✓ Saved' : 'Save & Download'}
                       </Button>
-                      
-                      <Button
-                        variant="contained"
-                        fullWidth
-                        startIcon={<Download />}
-                        onClick={handleDownload}
-                        disabled={isGenerating}
-                        sx={{
-                          borderRadius: 2,
-                          textTransform: 'none',
-                          fontWeight: 600,
-                          py: 1.5,
-                          background: 'linear-gradient(45deg, #667eea 30%, #764ba2 90%)',
-                          '&:hover': {
-                            background: 'linear-gradient(45deg, #5a6fd8 30%, #6a4190 90%)',
-                          }
-                        }}
-                      >
-                        {isGenerating ? 'Generating...' : 'Download PDF'}
-                      </Button>
-                      
-                      <Button
-                        variant="outlined"
-                        fullWidth
-                        startIcon={<Print />}
-                        onClick={handlePrint}
-                        sx={{
-                          borderRadius: 2,
-                          textTransform: 'none',
-                          fontWeight: 600,
-                          py: 1.5,
-                          borderColor: '#667eea',
-                          color: '#667eea',
-                          '&:hover': {
-                            borderColor: '#5a6fd8',
-                            backgroundColor: 'rgba(102, 126, 234, 0.04)',
-                          }
-                        }}
-                      >
-                        Print Certificate
-                      </Button>
-                      
-                      <Button
-                        variant="outlined"
-                        fullWidth
-                        startIcon={<Share />}
-                        onClick={handleShare}
-                        sx={{
-                          borderRadius: 2,
-                          textTransform: 'none',
-                          fontWeight: 600,
-                          py: 1.5,
-                          borderColor: '#667eea',
-                          color: '#667eea',
-                          '&:hover': {
-                            borderColor: '#5a6fd8',
-                            backgroundColor: 'rgba(102, 126, 234, 0.04)',
-                          }
-                        }}
-                      >
-                        Share Certificate
-                      </Button>
+                      ) : (
+                        <IconButton
+                          color="primary"
+                          onClick={() => setIsEditing(true)}
+                          sx={{ alignSelf: 'center', border: '1px solid #667eea', borderRadius: 2 }}
+                        >
+                          <Edit />
+                        </IconButton>
+                      )}
                     </Box>
                   </CardContent>
                 </Card>
@@ -963,6 +879,7 @@ const CertificatePreview = () => {
                   },
                 }}>
                   <Paper
+                    ref={certificateRef} // <-- add this
                     elevation={8}
                     sx={{
                       width: getCertificateDimensions(certificateSize).width,
@@ -1010,39 +927,104 @@ const CertificatePreview = () => {
                         }}
                       />
                     )}
+                    {/* Watermark overlay (rendered in DOM so it appears in download) */}
+                    {watermarkPattern && (
+                      <Box
+                        sx={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          pointerEvents: 'none',
+                          zIndex: 2,
+                        }}
+                      >
+                        {watermarkPattern.pattern.map((item, idx) => (
+                          <Box
+                            key={idx}
+                            sx={{
+                              position: 'absolute',
+                              left: item.x,
+                              top: item.y,
+                              color: '#cccccc',
+                              opacity: 0.05,
+                              fontSize: 10,
+                              fontFamily: 'Arial',
+                              transform: `rotate(${item.rotation}deg)`
+                            }}
+                          >
+                            {item.char}
+                          </Box>
+                        ))}
+                      </Box>
+                    )}
                     
                     {Object.entries(elements).map(([key, element]) => (
-                      <Draggable
-                        key={key}
-                        position={element.position}
-                        onStop={(e, data) => handleDrag(key, e, data)}
-                        bounds="parent"
-                      >
-                        <DraggableText
-                          selected={selectedElement === key}
-                          isName={key === 'name'}
-                          isSeal={key === 'seal'}
-                          onClick={() => handleElementClick(key)}
-                          sx={{
-                            zIndex: 1,
-                            position: 'relative',
-                          }}
+                      isEditing ? (
+                        <Draggable
+                          key={key}
+                          position={element.position}
+                          onStop={(e, data) => handleDrag(key, e, data)}
+                          bounds="parent"
+                          disabled={!isEditing}
                         >
-                          <ContentEditable
-                            html={element.text}
-                            onChange={(e) => handleTextChange(key, e)}
-                            tagName="div"
-                            className="content-editable"
-                            style={{
-                              ...element.style,
-                              textShadow: borderImage ? '0 1px 2px rgba(0,0,0,0.3)' : 'none',
-                              backgroundColor: borderImage ? 'rgba(255, 255, 255, 0.8)' : 'transparent',
-                              padding: borderImage ? '4px 8px' : '0',
-                              borderRadius: borderImage ? '4px' : '0',
+                          <DraggableText
+                            selected={selectedElement === key}
+                            isName={key === 'name'}
+                            // isSeal={key === 'seal'} // REMOVE this
+                            onClick={() => handleElementClick(key)}
+                            sx={{
+                              zIndex: 1,
+                              position: 'absolute',
+                              // REMOVE left: element.position.x, top: element.position.y here!
+                              pointerEvents: isEditing ? 'auto' : 'none',
                             }}
-                          />
-                        </DraggableText>
-                      </Draggable>
+                          >
+                            <ContentEditable
+                              html={element.text}
+                              onChange={(e) => handleTextChange(key, e)}
+                              tagName="div"
+                              className="content-editable"
+                              disabled={!isEditing}
+                              style={{
+                                ...element.style,
+                                textShadow: borderImage ? '0 1px 2px rgba(0,0,0,0.3)' : 'none',
+                                backgroundColor: borderImage ? 'rgba(255, 255, 255, 0.8)' : 'transparent',
+                                padding: borderImage ? '4px 8px' : '0',
+                                borderRadius: borderImage ? '4px' : '0',
+                                pointerEvents: isEditing ? 'auto' : 'none',
+                              }}
+                            />
+                          </DraggableText>
+                        </Draggable>
+                      ) : (
+                        <Box
+                          key={key}
+                          sx={{
+                            position: 'absolute',
+                            left: element.position.x,
+                            top: element.position.y,
+                            zIndex: 1,
+                            fontSize: element.style.fontSize,
+                            fontWeight: element.style.fontWeight,
+                            color: element.style.color,
+                            fontFamily: element.style.fontFamily,
+                            textAlign: element.style.textAlign,
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            boxShadow: 'none',
+                            padding: 0,
+                            m: 0,
+                            userSelect: 'none',
+                            pointerEvents: 'none',
+                            width: 'max-content',
+                            maxWidth: '100%',
+                            whiteSpace: 'pre-line',
+                          }}
+                          dangerouslySetInnerHTML={{ __html: element.text }}
+                        />
+                      )
                     ))}
                   </Paper>
                 </Box>
