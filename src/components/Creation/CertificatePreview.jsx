@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import Watermark from './Watermark';
 import { 
   Box, 
   Paper, 
@@ -50,81 +51,7 @@ const sha256 = async (message) => {
   return hashHex;
 };
 
-// Watermark pattern generator
-const generateWatermarkPattern = (hash, pattern) => {
-  const patterns = {
-    'inside-border': (hash) => {
-      // Create border pattern using hash
-      const chars = hash.substring(0, 16).split('');
-      return chars.map((char, index) => ({
-        char: char.toUpperCase(),
-        x: 20 + (index * 40),
-        y: 20,
-        rotation: index * 15
-      }));
-    },
-    'cross': (hash) => {
-      // Create cross pattern
-      const chars = hash.substring(0, 8).split('');
-      const centerX = 400;
-      const centerY = 350;
-      return [
-        ...chars.map((char, index) => ({
-          char: char.toUpperCase(),
-          x: centerX + (index * 30),
-          y: centerY,
-          rotation: 0
-        })),
-        ...chars.map((char, index) => ({
-          char: char.toUpperCase(),
-          x: centerX,
-          y: centerY + (index * 30),
-          rotation: 90
-        }))
-      ];
-    },
-    'plus': (hash) => {
-      // Create plus pattern
-      const chars = hash.substring(0, 12).split('');
-      const centerX = 400;
-      const centerY = 350;
-      return [
-        ...chars.slice(0, 4).map((char, index) => ({
-          char: char.toUpperCase(),
-          x: centerX + (index * 25),
-          y: centerY,
-          rotation: 0
-        })),
-        ...chars.slice(4, 8).map((char, index) => ({
-          char: char.toUpperCase(),
-          x: centerX,
-          y: centerY + (index * 25),
-          rotation: 90
-        })),
-        ...chars.slice(8, 12).map((char, index) => ({
-          char: char.toUpperCase(),
-          x: centerX + (index * 25),
-          y: centerY + 50,
-          rotation: 0
-        }))
-      ];
-    },
-    'minus': (hash) => {
-      // Create minus pattern
-      const chars = hash.substring(0, 10).split('');
-      const centerX = 400;
-      const centerY = 350;
-      return chars.map((char, index) => ({
-        char: char.toUpperCase(),
-        x: centerX + (index * 30),
-        y: centerY,
-        rotation: 0
-      }));
-    }
-  };
-  
-  return patterns[pattern] ? patterns[pattern](hash) : patterns['cross'](hash);
-};
+
 
 const StyledContainer = styled(Box)(({ theme }) => ({
   minHeight: '100vh',
@@ -379,28 +306,14 @@ const CertificatePreview = () => {
     }
   });
 
-  // Watermark state
-  const [watermarkPattern, setWatermarkPattern] = useState(null);
-  const [watermarkHash, setWatermarkHash] = useState('');
   const [isSaved, setIsSaved] = useState(false);
+  
+  // Watermark state for download
+  const [showWatermark, setShowWatermark] = useState(false);
+  const [watermarkHash, setWatermarkHash] = useState('');
+  const [watermarkPattern, setWatermarkPattern] = useState('');
 
-  // Generate new watermark pattern
-  const generateNewWatermarkPattern = async () => {
-    try {
-      const recipientName = certificateData?.name || 'John Doe';
-      const hash = await sha256(recipientName);
-      
-      // Randomly select a different pattern each time
-      const patterns = ['inside-border', 'cross', 'plus', 'minus'];
-      const randomPattern = patterns[Math.floor(Math.random() * patterns.length)];
-      const pattern = generateWatermarkPattern(hash, randomPattern);
-      
-      return { hash, pattern };
-    } catch (error) {
-      console.error('Error generating watermark:', error);
-      return null;
-    }
-  };
+
 
   useEffect(() => {
     const savedData = localStorage.getItem('certificateData');
@@ -452,6 +365,8 @@ const CertificatePreview = () => {
       });
     }
   }, []);
+
+
 
   // Update element positions when certificate size changes
   useEffect(() => {
@@ -526,17 +441,50 @@ const CertificatePreview = () => {
     await handleDownload();
   };
 
+
+
+  // SHA-256 encryption function
+  const sha256 = async (message) => {
+    const msgBuffer = new TextEncoder().encode(message);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return hashHex;
+  };
+
   const handleDownload = async () => {
     setIsGenerating(true);
     try {
       if (certificateRef.current) {
+        // Generate SHA-256 hash of userName for watermark
+        const recipientName = certificateData?.name || elements?.name?.text || 'John Doe';
+        const hash = await sha256(recipientName);
+        
+        // Randomly select a watermark pattern
+        const patterns = ['cross', 'plus', 'bottom-border', 'corner-borders', 'l-shape', 't-shape'];
+        const randomPattern = patterns[Math.floor(Math.random() * patterns.length)];
+        
+        // Set watermark state to show it during download
+        setWatermarkHash(hash);
+        setWatermarkPattern(randomPattern);
+        setShowWatermark(true);
+        
         // Wait a tick to ensure watermark is rendered
         await new Promise((resolve) => setTimeout(resolve, 100));
+        
+        // Capture the certificate with watermark
         const canvas = await html2canvas(certificateRef.current, {
           useCORS: true,
           backgroundColor: null,
           scale: 2,
         });
+        
+        // Remove watermark from DOM immediately after capture
+        setShowWatermark(false);
+        setWatermarkHash('');
+        setWatermarkPattern('');
+        
+        // Download the image
         const link = document.createElement('a');
         link.download = `certificate_${Date.now()}.png`;
         link.href = canvas.toDataURL();
@@ -544,6 +492,10 @@ const CertificatePreview = () => {
       }
     } catch (error) {
       console.error('Error capturing certificate:', error);
+      // Ensure watermark is removed even if error occurs
+      setShowWatermark(false);
+      setWatermarkHash('');
+      setWatermarkPattern('');
     }
     setIsGenerating(false);
   };
@@ -925,37 +877,14 @@ const CertificatePreview = () => {
                         }}
                       />
                     )}
-                    {/* Watermark overlay (rendered in DOM so it appears in download) */}
-                    {watermarkPattern && (
-                      <Box
-                        sx={{
-                          position: 'absolute',
-                          top: 0,
-                          left: 0,
-                          width: '100%',
-                          height: '100%',
-                          pointerEvents: 'none',
-                          zIndex: 2,
-                        }}
-                      >
-                        {watermarkPattern.pattern.map((item, idx) => (
-                          <Box
-                            key={idx}
-                            sx={{
-                              position: 'absolute',
-                              left: item.x,
-                              top: item.y,
-                              color: '#cccccc',
-                              opacity: 0.05,
-                              fontSize: 10,
-                              fontFamily: 'Arial',
-                              transform: `rotate(${item.rotation}deg)`
-                            }}
-                          >
-                            {item.char}
-                          </Box>
-                        ))}
-                      </Box>
+                    
+                    {/* Watermark component - only shown during download */}
+                    {showWatermark && (
+                      <Watermark 
+                        userName={certificateData?.name || elements?.name?.text || 'John Doe'}
+                        pattern={watermarkPattern}
+                        hash={watermarkHash}
+                      />
                     )}
                     
                     {Object.entries(elements).map(([key, element]) => (
