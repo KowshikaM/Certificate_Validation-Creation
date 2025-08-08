@@ -63,44 +63,49 @@ const StyledCard = styled(Card)(({ theme, selected }) => ({
 
 const borders = [
   { 
-    name: 'Classic Elegance', 
+    name: 'Modern Minimal', 
     file: '/borders/Border1.png',
-    description: 'Timeless design with sophisticated patterns'
+    description: 'Clean and contemporary style with golden accents'
   },
   { 
-    name: 'Modern Minimal', 
-    file: '/borders/Border2.jpg',
-    description: 'Clean and contemporary style'
+    name: 'Golden Elegance', 
+    file: '/borders/Border3.png',
+    description: 'Sophisticated golden border with metallic finish'
   },
   { 
     name: 'Floral Beauty', 
-    file: '/borders/Border3.png',
+    file: '/borders/Border4.png',
     description: 'Elegant floral motifs for special occasions'
   },
   { 
     name: 'Geometric Precision', 
-    file: '/borders/Border4.png',
+    file: '/borders/Border5.png',
     description: 'Sharp lines and geometric patterns'
   },
   { 
     name: 'Vintage Charm', 
-    file: '/borders/Border5.png',
+    file: '/borders/Border6.png',
     description: 'Classic vintage style with ornate details'
   },
   { 
     name: 'Corporate Professional', 
-    file: '/borders/Border6.png',
+    file: '/borders/Border7.png',
     description: 'Professional design for business certificates'
   },
   { 
     name: 'Artistic Flair', 
-    file: '/borders/Border7.png',
+    file: '/borders/Border8.png',
     description: 'Creative and artistic border design'
   },
   { 
     name: 'Luxury Premium', 
-    file: '/borders/Border8.png',
+    file: '/borders/Border2.png',
     description: 'Premium luxury design for special achievements'
+  },
+  { 
+    name: 'Classic Elegance', 
+    file: '/borders/Border9.png',
+    description: 'Timeless design with cream background, gold border, and red ribbons'
   },
 ];
 

@@ -512,24 +512,57 @@ const CertificatePreview = () => {
     });
   };
 
+  // Function to sample background color at a specific position in canvas
+  const sampleCanvasBackgroundColor = (ctx, x, y) => {
+    try {
+      const imageData = ctx.getImageData(x, y, 1, 1);
+      const data = imageData.data;
+      return {
+        r: data[0],
+        g: data[1],
+        b: data[2],
+        a: data[3]
+      };
+    } catch (error) {
+      // Fallback to a neutral color if sampling fails
+      return { r: 255, g: 255, b: 255, a: 255 };
+    }
+  };
+
+  // Function to blend colors for stealth watermarking
+  const blendWithBackground = (backgroundColor, intensity = 0.98) => {
+    // Use light grey color that's lightly visible
+    // This makes the hash detectable but not intrusive
+    return {
+      r: 200, // Light grey
+      g: 200, // Light grey
+      b: 200, // Light grey
+      a: backgroundColor.a * intensity
+    };
+  };
+
   const drawWatermark = (ctx, dimensions, pattern) => {
     if (!pattern) return;
     
-    // Draw watermark with very low opacity and light color
-    ctx.globalAlpha = 0.05; // Much lighter opacity
-    ctx.font = '10px Arial';
-    ctx.fillStyle = '#cccccc'; // Light gray color to match background
+    // Draw watermark with stealth color blending
+    ctx.font = '12px "Courier New", "Monaco", "Consolas", monospace';
     ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     
     pattern.forEach((item) => {
+        // Sample the background color at this position
+        const bgColor = sampleCanvasBackgroundColor(ctx, item.x, item.y);
+        const stealthColor = blendWithBackground(bgColor, 0.995);
+        
+        // Set the stealth color with very high opacity for maximum stealth
+        ctx.fillStyle = `rgba(${stealthColor.r}, ${stealthColor.g}, ${stealthColor.b}, ${stealthColor.a / 255})`;
+        
       ctx.save();
       ctx.translate(item.x, item.y);
       ctx.rotate((item.rotation * Math.PI) / 180);
       ctx.fillText(item.char, 0, 0);
       ctx.restore();
     });
-    
-    ctx.globalAlpha = 1.0;
   };
 
   const downloadCanvas = (canvas) => {
@@ -829,7 +862,8 @@ const CertificatePreview = () => {
                   },
                 }}>
                   <Paper
-                    ref={certificateRef} // <-- add this
+                    ref={certificateRef}
+                    data-certificate-preview="true"
                     elevation={8}
                     sx={{
                       width: getCertificateDimensions(certificateSize).width,
