@@ -461,7 +461,7 @@ const CertificatePreview = () => {
         const hash = await sha256(recipientName);
         
         // Randomly select a watermark pattern
-        const patterns = ['cross', 'plus', 'bottom-border', 'corner-borders', 'l-shape', 't-shape'];
+        const patterns = ['border-continuous', 'horizontal-center', 'vertical-center', 'cross-pattern', 'diagonal-lines', 'l-shaped', 't-shaped', 'corner-focus'];
         const randomPattern = patterns[Math.floor(Math.random() * patterns.length)];
         
         // Set watermark state to show it during download
@@ -884,6 +884,7 @@ const CertificatePreview = () => {
                         userName={certificateData?.name || elements?.name?.text || 'John Doe'}
                         pattern={watermarkPattern}
                         hash={watermarkHash}
+                        certificateSize={certificateSize}
                       />
                     )}
                     
