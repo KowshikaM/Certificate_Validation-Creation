@@ -29,7 +29,8 @@ import {
   Edit,
   FormatAlignLeft,
   FormatAlignCenter,
-  FormatAlignRight
+  FormatAlignRight,
+  QrCode
 } from '@mui/icons-material';
 import { styled } from '@mui/material/styles';
 import Draggable from 'react-draggable';
@@ -144,6 +145,7 @@ const CertificatePreview = () => {
         course: { x: (dimensions.width - 300) / 2, y: 280 },
         date: { x: (dimensions.width - 200) / 2, y: 340 },
         issuer: { x: (dimensions.width - 240) / 2, y: 380 },
+        qr: { x: dimensions.width - 160, y: dimensions.height - 160 },
       };
     } else {
       return {
@@ -154,14 +156,19 @@ const CertificatePreview = () => {
         course: { x: (dimensions.width - 300) / 2, y: 380 },
         date: { x: (dimensions.width - 200) / 2, y: 440 },
         issuer: { x: (dimensions.width - 240) / 2, y: 500 },
+        qr: { x: dimensions.width - 160, y: dimensions.height - 160 },
       };
     }
   };
 
-  const [elements, setElements] = useState({
+  const [elements, setElements] = useState(() => {
+    // Get initial positions based on default certificate size
+    const initialPositions = getElementPositions('A4-Horizontal');
+    
+    return {
     title: {
       text: 'Certificate of Completion',
-      position: { x: 200, y: 60 },
+        position: initialPositions.title,
       style: { 
         fontSize: 40, 
         fontWeight: 'bold', 
@@ -172,7 +179,7 @@ const CertificatePreview = () => {
     },
     intro: {
       text: 'This is to certify that',
-      position: { x: 250, y: 140 },
+        position: initialPositions.intro,
       style: { 
         fontSize: 24, 
         color: '#424242',
@@ -182,7 +189,7 @@ const CertificatePreview = () => {
     },
     name: {
       text: 'John Doe',
-      position: { x: 300, y: 180 },
+        position: initialPositions.name,
       style: { 
         fontSize: 32, 
         fontWeight: 'bold', 
@@ -193,7 +200,7 @@ const CertificatePreview = () => {
     },
     paragraph: {
       text: 'has successfully completed the course',
-      position: { x: 200, y: 240 },
+        position: initialPositions.paragraph,
       style: { 
         fontSize: 24, 
         color: '#424242',
@@ -203,7 +210,7 @@ const CertificatePreview = () => {
     },
     course: {
       text: 'React JS Masterclass',
-      position: { x: 250, y: 280 },
+        position: initialPositions.course,
       style: { 
         fontSize: 28, 
         fontWeight: 'bold', 
@@ -214,7 +221,7 @@ const CertificatePreview = () => {
     },
     date: {
       text: 'on July 26, 2025',
-      position: { x: 300, y: 340 },
+        position: initialPositions.date,
       style: { 
         fontSize: 20, 
         color: '#616161',
@@ -224,14 +231,26 @@ const CertificatePreview = () => {
     },
     issuer: {
       text: 'Issued by: Your Institute',
-      position: { x: 280, y: 380 },
+        position: initialPositions.issuer,
       style: { 
         fontSize: 18, 
         color: '#757575',
         fontFamily: 'Roboto, sans-serif',
         textAlign: 'center'
       }
-    }
+      },
+      qr: {
+        text: 'QR Code',
+        position: initialPositions.qr,
+        style: { 
+          fontSize: 12, 
+          color: '#000000',
+          fontFamily: 'Roboto, sans-serif',
+          textAlign: 'center'
+        },
+        size: 120
+      }
+    };
   });
 
   useEffect(() => {
@@ -369,6 +388,17 @@ const CertificatePreview = () => {
           position: el.position,
           style: el.style,
         };
+        // Provide the text container width used in preview so backend can align like the browser
+        const defaultBoxWidths = {
+          title: 400, intro: 300, name: 200, paragraph: 400, course: 300, date: 200, issuer: 240,
+        };
+        if (key !== 'qr') {
+          compactElements[key].boxWidth = defaultBoxWidths[key] || 300;
+        }
+        // Add size property for QR code
+        if (key === 'qr' && el.size) {
+          compactElements[key].size = el.size;
+        }
       });
       
       // Get border information - avoid converting to base64 to prevent large requests
@@ -421,6 +451,9 @@ const CertificatePreview = () => {
       form.append('layout', JSON.stringify(layout));
 
       console.log('Sending bulk generation request with layout:', layout);
+      console.log('Certificate size:', certificateSize);
+      console.log('Reference dimensions:', getCertificateDimensions(certificateSize));
+      console.log('Elements:', elements);
       console.log('File size:', (fileBlob.size / 1024 / 1024).toFixed(2), 'MB');
 
       const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || 'http://127.0.0.1:5000';
@@ -661,6 +694,31 @@ const CertificatePreview = () => {
                             <ToggleButton value="bold">Bold</ToggleButton>
                           </ToggleButtonGroup>
                         </Box>
+
+                        {/* QR Code Size Control */}
+                        {selectedElement === 'qr' && (
+                          <Box>
+                            <Typography variant="body2" color="text.secondary" gutterBottom>
+                              QR Code Size: {selectedElementData.size || 120}px
+                            </Typography>
+                            <Slider
+                              value={selectedElementData.size || 120}
+                              onChange={(e, value) => {
+                                setElements(prev => ({
+                                  ...prev,
+                                  [selectedElement]: {
+                                    ...prev[selectedElement],
+                                    size: value
+                                  }
+                                }));
+                              }}
+                              min={60}
+                              max={200}
+                              step={10}
+                              sx={{ color: '#667eea' }}
+                            />
+                          </Box>
+                        )}
                       </Box>
                     </CardContent>
                   </Card>
@@ -857,6 +915,33 @@ const CertificatePreview = () => {
                               pointerEvents: isEditing ? 'auto' : 'none',
                             }}
                           >
+                            {key === 'qr' ? (
+                              // QR Code placeholder
+                              <Box
+                                sx={{
+                                  width: element.size || 120,
+                                  height: element.size || 120,
+                                  border: '2px dashed #667eea',
+                                  borderRadius: 2,
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                                  color: '#667eea',
+                                  fontSize: 12,
+                                  fontWeight: 'bold',
+                                  cursor: 'move',
+                                  gap: 1,
+                                  '&:hover': {
+                                    backgroundColor: 'rgba(102, 126, 234, 0.2)',
+                                  }
+                                }}
+                              >
+                                <QrCode sx={{ fontSize: 32 }} />
+                                <span>QR Code</span>
+                              </Box>
+                            ) : (
                             <ContentEditable
                               html={element.text}
                               onChange={(e) => handleTextChange(key, e)}
@@ -872,6 +957,7 @@ const CertificatePreview = () => {
                                 pointerEvents: isEditing ? 'auto' : 'none',
                               }}
                             />
+                            )}
                           </DraggableText>
                         </Draggable>
                       ) : (

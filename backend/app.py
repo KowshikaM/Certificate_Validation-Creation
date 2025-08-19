@@ -12,10 +12,10 @@ from flask_cors import CORS
 from sqlalchemy import create_engine, Column, String, DateTime, Text
 from sqlalchemy.orm import declarative_base, sessionmaker
 import pandas as pd
-import qrcode
+import qrcode # type: ignore # type: ignore
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.utils import ImageReader
-from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader # type: ignore
+from reportlab.pdfgen import canvas # type: ignore
 
 
 # Configuration
@@ -98,18 +98,39 @@ def draw_hidden_watermark(c: canvas.Canvas, page_width: float, page_height: floa
 
 def _scale_position(x: float, y: float, ref_width: float, ref_height: float, target_width: float, target_height: float):
     try:
+        # Calculate scaling factors
         sx = max(target_width / float(ref_width), 0.0001)
         sy = max(target_height / float(ref_height), 0.0001)
-        return x * sx, y * sy
-    except Exception:
+        
+        # Scale the coordinates
+        scaled_x = x * sx
+        scaled_y = y * sy
+        
+        return scaled_x, scaled_y
+    except Exception as e:
+        print(f"Error in _scale_position: {e}")
         return x, y
 
 
 def build_certificate_pdf_bytes(data: dict, qr_img, layout: dict | None = None) -> bytes:
     # Prepare PDF in memory
     buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=A4)
-    width, height = A4
+
+    ref_w = 800.0
+    ref_h = 600.0
+
+    # Determine page size based on certificate reference dimensions from the layout
+    if layout:
+        ref_dims = layout.get('referenceDimensions') or {'width': 800, 'height': 600}
+        try:
+            ref_w = float(ref_dims.get('width', 800))
+            ref_h = float(ref_dims.get('height', 600))
+        except Exception:
+            ref_w, ref_h = 800.0, 600.0
+
+    # Make PDF page size exactly match the preview reference dimensions to avoid rounding errors
+    width, height = ref_w, ref_h
+    c = canvas.Canvas(buffer, pagesize=(width, height))
 
     if layout:
         # Optional border image as background (prefer embedded DataURL; fallback to URL fetch)
@@ -133,10 +154,6 @@ def build_certificate_pdf_bytes(data: dict, qr_img, layout: dict | None = None) 
                 except Exception:
                     pass
 
-        ref_dims = layout.get('referenceDimensions') or {'width': 800, 'height': 600}
-        ref_w = float(ref_dims.get('width', 800))
-        ref_h = float(ref_dims.get('height', 600))
-
         elements = layout.get('elements') or {}
 
         def draw_text(el_key: str, text: str, fallback_font=("Helvetica", 12)):
@@ -149,7 +166,17 @@ def build_certificate_pdf_bytes(data: dict, qr_img, layout: dict | None = None) 
             font_size = int(str(style.get('fontSize', fallback_font[1])).replace('px', '')) if isinstance(style.get('fontSize'), (str, int)) else fallback_font[1]
             font_weight = style.get('fontWeight', 'normal')
             color_hex = style.get('color', '#000000')
-            # We ignore textAlign for PDF anchoring because HTML positions are left-anchored.
+            text_align = style.get('textAlign', 'left')
+
+            # Optional container width from layout for proper centering (matches preview box width)
+            box_width = el.get('boxWidth')
+            # Reasonable defaults if not provided
+            default_box_widths = {
+                'title': 400, 'intro': 300, 'name': 200, 'paragraph': 400,
+                'course': 300, 'date': 200, 'issuer': 240
+            }
+            if not isinstance(box_width, (int, float)):
+                box_width = default_box_widths.get(el_key, 300)
 
             # Convert color hex to RGB
             try:
@@ -159,13 +186,44 @@ def build_certificate_pdf_bytes(data: dict, qr_img, layout: dict | None = None) 
                 r, g, b = 0, 0, 0
 
             c.setFillColorRGB(r, g, b)
-            safe_font = "Helvetica-Bold" if font_weight == 'bold' else "Helvetica"
+            safe_font = "Helvetica-Bold" if str(font_weight).lower() == 'bold' or str(font_weight) == '700' else "Helvetica"
             c.setFont(safe_font, font_size)
-            px, py_scaled = _scale_position(float(pos.get('x', 80)), float(pos.get('y', 80)), ref_w, ref_h, width, height)
-            # Frontend positions are measured from the top-left corner with Y increasing downward.
-            # ReportLab's coordinate system is bottom-left with Y increasing upward, so flip Y.
-            py = max(height - py_scaled, 0)
-            c.drawString(px, py, text)
+
+            # Get position from element (left/top anchor in preview coordinates)
+            px = float(pos.get('x', 80))
+            py = float(pos.get('y', 80))
+
+            # Scale coordinates to PDF dimensions (now 1:1 with reference dims)
+            px_scaled = (px / ref_w) * width
+            py_scaled = (py / ref_h) * height
+
+            # Frontend Y is top-down; PDF Y is bottom-up
+            py_final = height - py_scaled
+
+            # Compute alignment within the container box
+            container_width_scaled = (float(box_width) / ref_w) * width
+
+            # Determine anchor X based on alignment
+            if text_align == 'center':
+                anchor_x = px_scaled + (container_width_scaled / 2)
+                draw_fn = 'center'
+            elif text_align == 'right':
+                anchor_x = px_scaled + container_width_scaled
+                draw_fn = 'right'
+            else:  # left
+                anchor_x = px_scaled
+                draw_fn = 'left'
+
+            # Apply small padding away from edges
+            anchor_x = max(min(anchor_x, width - 10), 10)
+
+            # Draw text using appropriate alignment function
+            if draw_fn == 'center':
+                c.drawCentredString(anchor_x, py_final, text)
+            elif draw_fn == 'right':
+                c.drawRightString(anchor_x, py_final, text)
+            else:
+                c.drawString(anchor_x, py_final, text)
 
         draw_text('title', data.get('Certificate Title') or 'Certificate of Completion', ("Helvetica-Bold", 22))
         draw_text('intro', 'This is to certify that', ("Helvetica", 14))
@@ -181,14 +239,24 @@ def build_certificate_pdf_bytes(data: dict, qr_img, layout: dict | None = None) 
         qr_el = (elements.get('qr') or elements.get('QR') or elements.get('qrcode'))
         if qr_el:
             qpos = qr_el.get('position') or {'x': width - 160, 'y': 60}
-            qx_scaled, qy_scaled = _scale_position(float(qpos.get('x', width - 160)), float(qpos.get('y', 60)), ref_w, ref_h, width, height)
-            qy = max(height - qy_scaled, 0)
+            qx = float(qpos.get('x', width - 160))
+            qy = float(qpos.get('y', 60))
+
+            # Scale coordinates to PDF dimensions using the same logic as text
+            qx_scaled = (qx / ref_w) * width
+            qy_scaled = (qy / ref_h) * height
+
+            # Flip Y coordinate for PDF coordinate system
+            qy_final = height - qy_scaled
+
             qr_size = int(qr_el.get('size') or 120)
+            qr_size_scaled = (qr_size / ref_w) * width
+
             qr_bytes = io.BytesIO()
             qr_img.save(qr_bytes, format='PNG')
             qr_bytes.seek(0)
             qr_reader = ImageReader(qr_bytes)
-            c.drawImage(qr_reader, qx_scaled, qy, qr_size, qr_size, mask='auto')
+            c.drawImage(qr_reader, qx_scaled, qy_final, qr_size_scaled, qr_size_scaled, mask='auto')
             qr_drawn = True
     else:
         # Default simple layout
@@ -225,8 +293,10 @@ def build_certificate_pdf_bytes(data: dict, qr_img, layout: dict | None = None) 
             qr_bytes.seek(0)
             qr_reader = ImageReader(qr_bytes)
             qr_size = 120
-            c.drawImage(qr_reader, width - 80 - qr_size, 60, qr_size, qr_size, mask='auto')
-    except Exception:
+            # Position in bottom-right corner
+            c.drawImage(qr_reader, width - qr_size - 40, 40, qr_size, qr_size, mask='auto')
+    except Exception as e:
+        print(f"Error drawing fallback QR code: {e}")
         pass
 
     # Hidden watermark using the cert hash
@@ -248,6 +318,16 @@ def bulk_generate():
         if file.filename == '':
             return jsonify({"error": "No file selected"}), 400
 
+        # Debug form data
+        print(f"=== FORM DATA DEBUG ===")
+        print(f"Form keys: {list(request.form.keys())}")
+        print(f"Files keys: {list(request.files.keys())}")
+        if 'layout' in request.form:
+            print(f"Layout data present: {len(request.form['layout'])} characters")
+        else:
+            print("Layout data NOT present in form")
+        print(f"=== END FORM DATA DEBUG ===")
+
         filename = file.filename.lower()
         try:
             if filename.endswith('.csv'):
@@ -264,11 +344,29 @@ def bulk_generate():
         layout = None
         if 'layout' in request.form:
             try:
-                layout = json.loads(request.form['layout'] or '{}')
-                print(f"Received layout with {len(layout.get('elements', {}))} elements")
+                layout_data = request.form['layout'] or '{}'
+                print(f"Raw layout data: {layout_data[:200]}...")  # Show first 200 chars
+                layout = json.loads(layout_data)
+                
+                # Check if layout is empty or has no elements
+                if not layout or not layout.get('elements'):
+                    print("WARNING: Layout is empty or has no elements, using default layout")
+                    layout = None
+                else:
+                    print(f"=== LAYOUT DEBUG INFO ===")
+                    print(f"Received layout with {len(layout.get('elements', {}))} elements")
+                    print(f"Layout reference dimensions: {layout.get('referenceDimensions')}")
+                    print(f"Layout elements: {list(layout.get('elements', {}).keys())}")
+                    print(f"Full layout data: {json.dumps(layout, indent=2)}")
+                    print(f"=== END LAYOUT DEBUG ===")
             except Exception as e:
                 print(f"Failed to parse layout JSON: {e}")
+                print(f"Raw layout data that failed: {request.form['layout'][:500]}...")
                 layout = None
+        else:
+            print("ERROR: No layout data found in form")
+            print(f"Available form keys: {list(request.form.keys())}")
+            print(f"Available files keys: {list(request.files.keys())}")
 
         # Validate columns
         missing = [col for col in REQUIRED_COLUMNS if col not in df.columns]
@@ -327,6 +425,16 @@ def bulk_generate():
                     'Certificate Description': desc,
                     'cert_hash': cert_hash,
                 }, qr_img, layout)
+
+                # Debug: Check if layout was used for this certificate
+                if idx == 0:  # Only print for first certificate to avoid spam
+                    print(f"=== CERTIFICATE GENERATION SUMMARY ===")
+                    print(f"Certificate {idx + 1}: {recipient}")
+                    print(f"Layout provided: {layout is not None}")
+                    if layout:
+                        print(f"Layout elements: {list(layout.get('elements', {}).keys())}")
+                        print(f"Layout dimensions: {layout.get('referenceDimensions')}")
+                    print(f"=== END SUMMARY ===")
 
                 pdf_name = f"certificate_{idx + 1}.pdf"
                 zf.writestr(pdf_name, pdf_bytes)

@@ -190,6 +190,37 @@ const CustomizationPanel = ({ onStyleChange, onBorderAdjust, selectedElement, el
                     <HexColorPicker color={selectedColor} onChange={handleColorChange} />
                   </Box>
                 </Popover>
+
+                {/* QR Code Size Control */}
+                {selectedElement === 'qr' && (
+                  <>
+                    <Typography gutterBottom sx={{ fontSize: '0.9rem', color: '#616161', mt: 2 }}>
+                      QR Code Size
+                    </Typography>
+                    <Slider
+                      min={60}
+                      max={200}
+                      step={10}
+                      value={selectedElementData.size || 120}
+                      onChange={(e, value) => {
+                        if (setElements) {
+                          setElements(prev => ({
+                            ...prev,
+                            [selectedElement]: {
+                              ...prev[selectedElement],
+                              size: value
+                            }
+                          }));
+                        }
+                      }}
+                      aria-label="QR Code Size"
+                      sx={{ mb: 2 }}
+                    />
+                    <Typography variant="body2" sx={{ color: '#616161', fontSize: '0.8rem', mb: 2 }}>
+                      Size: {selectedElementData.size || 120}px
+                    </Typography>
+                  </>
+                )}
               </Box>
               
               <Divider />
