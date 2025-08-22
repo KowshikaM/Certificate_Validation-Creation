@@ -40,46 +40,74 @@ const BulkUpload = () => {
     }
     try {
       setIsSubmitting(true);
-      setStatusMessage('Preparing preview...');
+      setStatusMessage('Generating certificates using fixed template...');
+
+      // Define STRICT, pixel-perfect layout for the pre‑designed template
+      const refWidth = 1120; // reference canvas width (px)
+      const refHeight = 800; // reference canvas height (px)
+      const fixedLayout = {
+        referenceDimensions: { width: refWidth, height: refHeight },
+        // Use absolute URL so backend can fetch the border reliably
+        borderImageUrlAbsolute: `${window.location.origin}/borders/Border9.png`,
+        elements: {
+          title: {
+            position: { x: 160, y: 90 },
+            boxWidth: 800,
+            style: { fontSize: 36, fontWeight: '700', color: '#1e2d8b', textAlign: 'center' },
+          },
+          intro: {
+            position: { x: 260, y: 150 },
+            boxWidth: 600,
+            style: { fontSize: 18, fontWeight: '400', color: '#475569', textAlign: 'center' },
+          },
+          name: {
+            position: { x: 280, y: 200 },
+            boxWidth: 560,
+            style: { fontSize: 28, fontWeight: '700', color: '#2d3748', textAlign: 'center' },
+          },
+          paragraph: {
+            position: { x: 210, y: 250 },
+            boxWidth: 700,
+            style: { fontSize: 16, fontWeight: '400', color: '#475569', textAlign: 'center' },
+          },
+          course: {
+            position: { x: 260, y: 308 },
+            boxWidth: 600,
+            style: { fontSize: 22, fontWeight: '700', color: '#1976d2', textAlign: 'center' },
+          },
+          date: {
+            position: { x: 120, y: 640 },
+            boxWidth: 220,
+            style: { fontSize: 14, fontWeight: '400', color: '#6b7280', textAlign: 'left' },
+          },
+          issuer: {
+            position: { x: 120, y: 670 },
+            boxWidth: 260,
+            style: { fontSize: 14, fontWeight: '400', color: '#6b7280', textAlign: 'left' },
+          },
+          qr: {
+            position: { x: 880, y: 360 },
+            size: 140,
+          },
+        },
+      };
+
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('layout', JSON.stringify(fixedLayout));
 
-      // 1) Ask backend for a sample row to preview
-      const sampleRes = await fetch(`${apiBaseUrl}/bulk_preview_sample`, {
+      const res = await fetch(`${apiBaseUrl}/bulk_generate`, {
         method: 'POST',
         body: formData,
       });
-      const sampleJson = await sampleRes.json();
-      if (!sampleRes.ok) throw new Error(sampleJson.error || 'Failed to read file');
-
-      // 2) Persist the original file for later bulk generation (ObjectURL + Base64)
-      const fileUrl = URL.createObjectURL(file);
-      sessionStorage.setItem('bulkFileObjectUrl', fileUrl);
-      sessionStorage.setItem('bulkFileName', file.name || 'bulk.xlsx');
-      // Also store base64 in case ObjectURL is invalidated during navigation
-      const fileAsBase64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(file);
-      });
-      sessionStorage.setItem('bulkFileBase64', fileAsBase64);
-
-      // 3) Save sample to localStorage for preview component
-      const sample = sampleJson.sample || {};
-      localStorage.setItem('certificateData', JSON.stringify({
-        name: sample['Recipient Name'] || '',
-        course: sample['Course Name'] || '',
-        date: sample['Certificate Date'] || '',
-        issuer: sample['Issuing Organization'] || '',
-        certificateTitle: sample['Certificate Title'] || '',
-        paragraph: sample['Certificate Description'] || '',
-      }));
-
-      // 4) Indicate bulk mode and route to size selector → border → preview
-      sessionStorage.setItem('bulkMode', 'true');
-      navigate('/creation/size');
-      setStatusMessage('Select a border, then preview. When you save, all certificates will generate.');
+      if (!res.ok) {
+        const maybeJson = await res.json().catch(() => null);
+        throw new Error(maybeJson?.error || `Bulk generation failed with ${res.status}`);
+      }
+      const zipBlob = await res.blob();
+      const url = URL.createObjectURL(zipBlob);
+      setDownloadUrl(url);
+      setStatusMessage('Done. Download your ZIP below.');
     } catch (err) {
       const msg = err?.message || 'An unexpected error occurred';
       const hint = `Could not reach API at ${apiBaseUrl}. Ensure backend is running (try opening ${apiBaseUrl}/health) and that CORS/HTTPS are correct.`;
