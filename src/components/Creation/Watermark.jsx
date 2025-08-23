@@ -296,45 +296,48 @@ const generateWatermarkLayout = (hash, pattern, certificateWidth = 800, certific
   return patterns[pattern] ? patterns[pattern](hash, certificateWidth, certificateHeight) : patterns['border-continuous'](hash, certificateWidth, certificateHeight);
 };
 
-// Function to sample background color at a specific position
-const sampleBackgroundColor = (canvas, x, y) => {
+// Function to generate SHA-256 hash of username
+const generateHash = async (username) => {
   try {
-    const ctx = canvas.getContext('2d');
-    const imageData = ctx.getImageData(x, y, 1, 1);
-    const data = imageData.data;
-    return {
-      r: data[0],
-      g: data[1],
-      b: data[2],
-      a: data[3]
-    };
+    const msgBuffer = new TextEncoder().encode(username);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return hashHex;
   } catch (error) {
-    // Fallback to a neutral color if sampling fails
-    return { r: 255, g: 255, b: 255, a: 255 };
+    console.error('Error generating hash:', error);
+    // Fallback to a simple hash if crypto.subtle is not available
+    return username.split('').reduce((a, b) => {
+      a = ((a << 5) - a) + b.charCodeAt(0);
+      return a & a;
+    }, 0).toString(16);
   }
 };
 
-// Function to blend colors for stealth watermarking
-const blendWithBackground = (backgroundColor, intensity = 0.98) => {
-  // Use light grey color that's lightly visible
-  // This makes the hash detectable but not intrusive
-  return {
-    r: 200, // Light grey
-    g: 200, // Light grey
-    b: 200, // Light grey
-    a: backgroundColor.a * intensity
-  };
+// Function to get random watermark pattern
+const getRandomPattern = () => {
+  const patterns = [
+    'border-continuous', 
+    'horizontal-center', 
+    'vertical-center', 
+    'cross-pattern', 
+    'diagonal-lines', 
+    'l-shaped', 
+    't-shaped', 
+    'corner-focus'
+  ];
+  return patterns[Math.floor(Math.random() * patterns.length)];
 };
 
-// Function to convert RGB to hex
-const rgbToHex = (r, g, b) => {
-  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
-};
-
-const Watermark = ({ userName, pattern, hash, certificateSize = 'A4-Horizontal' }) => {
+const Watermark = ({ 
+  userName, 
+  isVisible = false, 
+  onWatermarkReady,
+  certificateSize = 'A4-Horizontal' 
+}) => {
   const [watermarkElements, setWatermarkElements] = useState([]);
-  const [stealthColors, setStealthColors] = useState({});
-  const canvasRef = useRef(null);
+  const [currentHash, setCurrentHash] = useState('');
+  const [currentPattern, setCurrentPattern] = useState('');
   const containerRef = useRef(null);
 
   // Get certificate dimensions based on size
@@ -348,47 +351,54 @@ const Watermark = ({ userName, pattern, hash, certificateSize = 'A4-Horizontal' 
     return dimensions[size] || dimensions['A4-Horizontal'];
   };
 
-  // Function to analyze background and generate stealth colors
-  const analyzeBackground = () => {
-    if (!containerRef.current || !hash) return;
+  // Function to generate watermark when needed
+  const generateWatermark = async () => {
+    if (!userName || !isVisible) return;
 
-    const container = containerRef.current;
-    const dimensions = getCertificateDimensions(certificateSize);
-    
-    // Generate layout and apply light grey color to all elements
-    const layout = generateWatermarkLayout(hash, pattern, dimensions.width, dimensions.height);
-    const colors = {};
-    
-    layout.forEach((element, index) => {
-      // Use light grey color for all elements
-      const stealthColor = blendWithBackground({ r: 255, g: 255, b: 255, a: 255 }, 0.995);
-      colors[index] = rgbToHex(stealthColor.r, stealthColor.g, stealthColor.b);
-    });
-    
-    setStealthColors(colors);
-    setWatermarkElements(layout);
+    try {
+      // Generate SHA-256 hash of username
+      const hash = await generateHash(userName);
+      
+      // Get random pattern for this generation
+      const pattern = getRandomPattern();
+      
+      // Get certificate dimensions
+      const dimensions = getCertificateDimensions(certificateSize);
+      
+      // Generate watermark layout
+      const layout = generateWatermarkLayout(hash, pattern, dimensions.width, dimensions.height);
+      
+      // Set state
+      setCurrentHash(hash);
+      setCurrentPattern(pattern);
+      setWatermarkElements(layout);
+      
+      // Notify parent component that watermark is ready
+      if (onWatermarkReady) {
+        onWatermarkReady(hash, pattern);
+      }
+      
+    } catch (error) {
+      console.error('Error generating watermark:', error);
+    }
   };
 
+  // Effect to generate watermark when visibility changes
   useEffect(() => {
-    const generateWatermark = async () => {
-      if (!userName || !pattern || !hash) return;
-      
-      try {
-        const dimensions = getCertificateDimensions(certificateSize);
-        const layout = generateWatermarkLayout(hash, pattern, dimensions.width, dimensions.height);
-        setWatermarkElements(layout);
-        
-        // Analyze background after a short delay to ensure DOM is ready
-        setTimeout(analyzeBackground, 100);
-      } catch (error) {
-        console.error('Error generating watermark layout:', error);
-      }
-    };
+    if (isVisible) {
+      generateWatermark();
+    } else {
+      // Clear watermark when not visible
+      setWatermarkElements([]);
+      setCurrentHash('');
+      setCurrentPattern('');
+    }
+  }, [isVisible, userName, certificateSize]);
 
-    generateWatermark();
-  }, [userName, pattern, hash, certificateSize]);
-
-  if (!userName || !pattern || !hash || watermarkElements.length === 0) return null;
+  // Don't render anything if watermark is not visible
+  if (!isVisible || !watermarkElements.length || !currentHash) {
+    return null;
+  }
 
   return (
     <div
@@ -404,32 +414,26 @@ const Watermark = ({ userName, pattern, hash, certificateSize = 'A4-Horizontal' 
         zIndex: 1,
       }}
     >
-      {watermarkElements.map((element, index) => {
-        const stealthColor = stealthColors[index] || '#ffffff';
-        
-        return (
-          <div
-            key={index}
-            style={{
-              position: 'absolute',
-              left: element.x,
-              top: element.y,
-              fontSize: 12, // Maintain original font size
-              color: stealthColor, // Use stealth color that blends with background
-              fontFamily: '"Courier New", "Monaco", "Consolas", monospace', // Monospace for consistent character width
-              fontWeight: 400,
-              transform: `rotate(${element.rotation}deg)`,
-              whiteSpace: 'nowrap',
-              letterSpacing: '0.5px', // Slight spacing for better readability
-              // Remove text shadow and opacity to make it truly stealth
-              // The color blending makes it nearly invisible to humans
-              // but still present in the DOM and retrievable
-            }}
-          >
-            {element.char}
-          </div>
-        );
-      })}
+      {watermarkElements.map((element, index) => (
+        <div
+          key={index}
+          style={{
+            position: 'absolute',
+            left: element.x,
+            top: element.y,
+            fontSize: 12,
+            color: '#c8c8c8', // Light grey color for subtle watermark
+            fontFamily: '"Courier New", "Monaco", "Consolas", monospace',
+            fontWeight: 400,
+            transform: `rotate(${element.rotation}deg)`,
+            whiteSpace: 'nowrap',
+            letterSpacing: '0.5px',
+            opacity: 0.3, // Very subtle opacity
+          }}
+        >
+          {element.char}
+        </div>
+      ))}
     </div>
   );
 };

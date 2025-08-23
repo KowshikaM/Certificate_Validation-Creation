@@ -17,7 +17,8 @@ import {
   Select,
   MenuItem,
   ToggleButton,
-  ToggleButtonGroup
+  ToggleButtonGroup,
+  Tooltip
 } from '@mui/material';
 import { 
   ArrowBack,
@@ -36,15 +37,9 @@ import { styled } from '@mui/material/styles';
 import Draggable from 'react-draggable';
 import ContentEditable from 'react-contenteditable';
 import html2canvas from 'html2canvas';
+import QRCode from 'qrcode';
 
-// SHA-256 encryption function
-const sha256 = async (message) => {
-  const msgBuffer = new TextEncoder().encode(message);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  return hashHex;
-};
+
 
 const StyledContainer = styled(Box)(({ theme }) => ({
   minHeight: '100vh',
@@ -119,6 +114,9 @@ const CertificatePreview = () => {
   const [showWatermark, setShowWatermark] = useState(false);
   const [watermarkHash, setWatermarkHash] = useState('');
   const [watermarkPattern, setWatermarkPattern] = useState('');
+  
+  // QR Code state
+  const [qrCodeDataURL, setQrCodeDataURL] = useState('');
 
   // Define certificate dimensions based on size
   const getCertificateDimensions = (size) => {
@@ -220,7 +218,7 @@ const CertificatePreview = () => {
       }
     },
     date: {
-      text: 'on July 26, 2025',
+      text: 'on 26-07-2025',
         position: initialPositions.date,
       style: { 
         fontSize: 20, 
@@ -272,7 +270,7 @@ const CertificatePreview = () => {
         title: { ...prev.title, text: data.certificateTitle || 'Certificate of Completion' },
         name: { ...prev.name, text: data.name || 'John Doe' },
         course: { ...prev.course, text: data.course || 'React JS Masterclass' },
-        date: { ...prev.date, text: `on ${data.date || 'July 26, 2025'}` },
+        date: { ...prev.date, text: `on ${data.date || '26-07-2025'}` },
         issuer: { ...prev.issuer, text: `Issued by: ${data.issuer || 'Your Institute'}` },
         paragraph: { ...prev.paragraph, text: data.paragraph || 'has successfully completed the course' },
       }));
@@ -301,6 +299,17 @@ const CertificatePreview = () => {
       });
     }
   }, []);
+
+  // Generate QR code when certificate data or elements change
+  useEffect(() => {
+    const generateQR = async () => {
+      // Generate QR code whenever certificate data or elements change
+      const qrData = await generateQRCode(certificateData || {});
+      setQrCodeDataURL(qrData);
+    };
+    
+    generateQR();
+  }, [certificateData, elements]);
 
   // Update element positions when certificate size changes
   useEffect(() => {
@@ -339,7 +348,12 @@ const CertificatePreview = () => {
         text: e.target.value,
       },
     }));
-  }, []);
+    
+    // Regenerate QR code when text changes to ensure it's always up-to-date
+    setTimeout(() => {
+      generateQRCode(certificateData || {}).then(setQrCodeDataURL);
+    }, 100);
+  }, [certificateData]);
 
   const handleElementClick = useCallback((key) => {
     setSelectedElement(key);
@@ -356,6 +370,91 @@ const CertificatePreview = () => {
         }
       }
     }));
+  };
+
+  // Function to manually refresh QR code
+  const refreshQRCode = async () => {
+    const qrData = await generateQRCode(certificateData || {});
+    setQrCodeDataURL(qrData);
+  };
+
+  // Function to show QR code content
+  const showQRCodeContent = () => {
+    const currentElements = elements;
+    const qrData = {
+      certificateType: currentElements.title?.text || 'Certificate of Completion',
+      recipientName: currentElements.name?.text || 'John Doe',
+      courseName: currentElements.course?.text || 'React JS Masterclass',
+      completionDate: currentElements.date?.text || '26-07-2025',
+      issuingInstitute: currentElements.issuer?.text || 'Your Institute',
+      certificateId: `CERT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      issuedOn: new Date().toISOString().split('T')[0],
+      verificationNote: 'Scan this QR code to verify certificate authenticity'
+    };
+    
+    const readableText = `CERTIFICATE OF COMPLETION
+
+Recipient: ${qrData.recipientName}
+Course: ${qrData.courseName}
+Date: ${qrData.completionDate}
+Issued by: ${qrData.issuingInstitute}
+Certificate ID: ${qrData.certificateId}
+Issued on: ${qrData.issuedOn}
+
+${qrData.verificationNote}`;
+    
+    alert(`QR Code Content:\n\n${readableText}\n\nThis information is encoded directly in the QR code and will be displayed when scanned.`);
+  };
+
+  // Function to generate QR code with user details
+  const generateQRCode = async (userDetails) => {
+    try {
+      // Get current certificate elements for complete information
+      const currentElements = elements;
+      
+      // Create comprehensive certificate data for QR code
+      const qrData = {
+        certificateType: currentElements.title?.text || 'Certificate of Completion',
+        recipientName: currentElements.name?.text || userDetails.name || 'John Doe',
+        courseName: currentElements.course?.text || userDetails.course || 'React JS Masterclass',
+        completionDate: currentElements.date?.text || userDetails.date || '26-07-2025',
+        issuingInstitute: currentElements.issuer?.text || userDetails.issuer || 'Your Institute',
+        certificateId: `CERT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        issuedOn: new Date().toISOString().split('T')[0], // Current date in YYYY-MM-DD format
+        verificationNote: 'Scan this QR code to verify certificate authenticity'
+      };
+      
+      // Convert to human-readable text format for better scanning experience
+      const readableText = `CERTIFICATE OF COMPLETION
+
+Recipient: ${qrData.recipientName}
+Course: ${qrData.courseName}
+Date: ${qrData.completionDate}
+Issued by: ${qrData.issuingInstitute}
+Certificate ID: ${qrData.certificateId}
+Issued on: ${qrData.issuedOn}
+
+${qrData.verificationNote}`;
+      
+      // Log the QR code content for debugging (remove in production)
+      console.log('QR Code Content:', readableText);
+      console.log('QR Code Data Object:', qrData);
+      
+      const qrCodeDataURL = await QRCode.toDataURL(readableText, {
+        width: 120,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF'
+        },
+        errorCorrectionLevel: 'M' // Medium error correction for better scanning
+      });
+      
+      return qrCodeDataURL;
+    } catch (error) {
+      console.error('Error generating QR code:', error);
+      return null;
+    }
   };
 
   const handleSave = async () => {
@@ -494,21 +593,11 @@ const CertificatePreview = () => {
     setIsGenerating(true);
     try {
       if (certificateRef.current) {
-        // Generate SHA-256 hash of userName for watermark
-        const recipientName = certificateData?.name || elements?.name?.text || 'John Doe';
-        const hash = await sha256(recipientName);
-        
-        // Randomly select a watermark pattern
-        const patterns = ['border-continuous', 'horizontal-center', 'vertical-center', 'cross-pattern', 'diagonal-lines', 'l-shaped', 't-shaped', 'corner-focus'];
-        const randomPattern = patterns[Math.floor(Math.random() * patterns.length)];
-        
-        // Set watermark state to show it during download
-        setWatermarkHash(hash);
-        setWatermarkPattern(randomPattern);
+        // Show watermark - it will generate hash and pattern automatically
         setShowWatermark(true);
         
-        // Wait a tick to ensure watermark is rendered
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        // Wait for watermark to be generated and rendered
+        await new Promise((resolve) => setTimeout(resolve, 200));
         
         // Capture the certificate with watermark
         const canvas = await html2canvas(certificateRef.current, {
@@ -891,8 +980,11 @@ const CertificatePreview = () => {
                     {showWatermark && (
                       <Watermark 
                         userName={certificateData?.name || elements?.name?.text || 'John Doe'}
-                        pattern={watermarkPattern}
-                        hash={watermarkHash}
+                        isVisible={showWatermark}
+                        onWatermarkReady={(hash, pattern) => {
+                          setWatermarkHash(hash);
+                          setWatermarkPattern(pattern);
+                        }}
                         certificateSize={certificateSize}
                       />
                     )}
@@ -916,7 +1008,7 @@ const CertificatePreview = () => {
                             }}
                           >
                             {key === 'qr' ? (
-                              // QR Code placeholder
+                              // QR Code display
                               <Box
                                 sx={{
                                   width: element.size || 120,
@@ -938,8 +1030,60 @@ const CertificatePreview = () => {
                                   }
                                 }}
                               >
-                                <QrCode sx={{ fontSize: 32 }} />
-                                <span>QR Code</span>
+                                {qrCodeDataURL ? (
+                                  <>
+                                    <img 
+                                      src={qrCodeDataURL} 
+                                      alt="QR Code" 
+                                      onClick={showQRCodeContent}
+                                      style={{ 
+                                        width: '100px', 
+                                        height: '100px',
+                                        cursor: 'pointer'
+                                      }} 
+                                      title="Click to view QR code content"
+                                    />
+                                    <Tooltip title="Refresh QR Code" arrow>
+                                      <IconButton
+                                        size="small"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          refreshQRCode();
+                                        }}
+                                        sx={{
+                                          position: 'absolute',
+                                          top: 2,
+                                          right: 2,
+                                          backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                                          '&:hover': {
+                                            backgroundColor: 'rgba(255, 255, 255, 1)',
+                                          }
+                                        }}
+                                      >
+                                        <Settings sx={{ fontSize: 16 }} />
+                                      </IconButton>
+                                    </Tooltip>
+                                  </>
+                                ) : (
+                                  <>
+                                    <QrCode sx={{ fontSize: 32 }} />
+                                    <span>Generating...</span>
+                                  </>
+                                )}
+                                
+                                {/* Information about QR code content */}
+                                <Typography 
+                                  variant="caption" 
+                                  sx={{ 
+                                    fontSize: 10, 
+                                    color: '#666',
+                                    textAlign: 'center',
+                                    mt: 1,
+                                    maxWidth: '100px'
+                                  }}
+                                >
+                                  Click QR code to view content
+                                </Typography>
                               </Box>
                             ) : (
                             <ContentEditable
@@ -961,31 +1105,58 @@ const CertificatePreview = () => {
                           </DraggableText>
                         </Draggable>
                       ) : (
-                        <Box
-                          key={key}
-                          sx={{
-                            position: 'absolute',
-                            left: element.position.x,
-                            top: element.position.y,
-                            zIndex: 1,
-                            fontSize: element.style.fontSize,
-                            fontWeight: element.style.fontWeight,
-                            color: element.style.color,
-                            fontFamily: element.style.fontFamily,
-                            textAlign: element.style.textAlign,
-                            backgroundColor: 'transparent',
-                            border: 'none',
-                            boxShadow: 'none',
-                            padding: 0,
-                            m: 0,
-                            userSelect: 'none',
-                            pointerEvents: 'none',
-                            width: 'max-content',
-                            maxWidth: '100%',
-                            whiteSpace: 'pre-line',
-                          }}
-                          dangerouslySetInnerHTML={{ __html: element.text }}
-                        />
+                        key === 'qr' ? (
+                          <Box
+                            key={key}
+                            sx={{
+                              position: 'absolute',
+                              left: element.position.x,
+                              top: element.position.y,
+                              zIndex: 1,
+                              userSelect: 'none',
+                              pointerEvents: 'none',
+                              width: element.size || 120,
+                              height: element.size || 120,
+                            }}
+                          >
+                            {qrCodeDataURL ? (
+                              <img 
+                                src={qrCodeDataURL} 
+                                alt="QR Code" 
+                                style={{ 
+                                  width: '100%', 
+                                  height: '100%'
+                                }} 
+                              />
+                            ) : null}
+                          </Box>
+                        ) : (
+                          <Box
+                            key={key}
+                            sx={{
+                              position: 'absolute',
+                              left: element.position.x,
+                              top: element.position.y,
+                              zIndex: 1,
+                              fontSize: element.style.fontSize,
+                              fontWeight: element.style.fontWeight,
+                              color: element.style.color,
+                              fontFamily: element.style.fontFamily,
+                              textAlign: element.style.textAlign,
+                              backgroundColor: 'transparent',
+                              border: 'none',
+                              boxShadow: 'none',
+                              padding: 0,
+                              m: 0,
+                              userSelect: 'none',
+                              pointerEvents: 'none',
+                              width: 'max-content',
+                              maxWidth: '100%',
+                              whiteSpace: 'pre-line',
+                            }}
+                            dangerouslySetInnerHTML={{ __html: element.text }}
+                          />
+                        )
                       )
                     ))}
                   </Paper>
