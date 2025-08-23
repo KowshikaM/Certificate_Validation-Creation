@@ -16,7 +16,6 @@ import qrcode # type: ignore # type: ignore
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader # type: ignore
 from reportlab.pdfgen import canvas # type: ignore
-from reportlab.pdfbase import pdfmetrics  # type: ignore
 
 
 # Configuration
@@ -194,15 +193,15 @@ def build_certificate_pdf_bytes(data: dict, qr_img, layout: dict | None = None) 
             px = float(pos.get('x', 80))
             py = float(pos.get('y', 80))
 
-            # Use exact pixel coordinates from saved layout by matching page size to reference
-            px_scaled = px
-            py_scaled = py
+            # Scale coordinates to PDF dimensions (now 1:1 with reference dims)
+            px_scaled = (px / ref_w) * width
+            py_scaled = (py / ref_h) * height
 
             # Frontend Y is top-down; PDF Y is bottom-up
             py_final = height - py_scaled
 
             # Compute alignment within the container box
-            container_width_scaled = float(box_width)
+            container_width_scaled = (float(box_width) / ref_w) * width
 
             # Determine anchor X based on alignment
             if text_align == 'center':
@@ -215,16 +214,16 @@ def build_certificate_pdf_bytes(data: dict, qr_img, layout: dict | None = None) 
                 anchor_x = px_scaled
                 draw_fn = 'left'
 
-            # Compute baseline adjustment so that provided Y is treated as TOP edge
-            baseline_y = py_final - float(font_size)
+            # Apply small padding away from edges
+            anchor_x = max(min(anchor_x, width - 10), 10)
 
             # Draw text using appropriate alignment function
             if draw_fn == 'center':
-                c.drawCentredString(anchor_x, baseline_y, text)
+                c.drawCentredString(anchor_x, py_final, text)
             elif draw_fn == 'right':
-                c.drawRightString(anchor_x, baseline_y, text)
+                c.drawRightString(anchor_x, py_final, text)
             else:
-                c.drawString(anchor_x, baseline_y, text)
+                c.drawString(anchor_x, py_final, text)
 
         draw_text('title', data.get('Certificate Title') or 'Certificate of Completion', ("Helvetica-Bold", 22))
         draw_text('intro', 'This is to certify that', ("Helvetica", 14))
@@ -244,15 +243,14 @@ def build_certificate_pdf_bytes(data: dict, qr_img, layout: dict | None = None) 
             qy = float(qpos.get('y', 60))
 
             # Scale coordinates to PDF dimensions using the same logic as text
-            # Use exact pixel coordinates (page == reference)
-            qx_scaled = qx
-            qy_scaled = qy
+            qx_scaled = (qx / ref_w) * width
+            qy_scaled = (qy / ref_h) * height
+
+            # Flip Y coordinate for PDF coordinate system
+            qy_final = height - qy_scaled
 
             qr_size = int(qr_el.get('size') or 120)
-            qr_size_scaled = float(qr_size)
-            # Flip Y coordinate for PDF coordinate system
-            # Treat provided Y as the TOP of the QR box; convert to bottom-left for PDF
-            qy_final = height - qy_scaled - qr_size_scaled
+            qr_size_scaled = (qr_size / ref_w) * width
 
             qr_bytes = io.BytesIO()
             qr_img.save(qr_bytes, format='PNG')

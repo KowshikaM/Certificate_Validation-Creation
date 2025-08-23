@@ -103,90 +103,32 @@ const NativeBulkForm = () => {
 
     try {
       setIsSubmitting(true);
-      setStatus('Generating certificates using fixed template...');
+      setStatus('Preparing preview...');
 
-      // Create CSV Blob
+      // 1) Create CSV Blob and store ObjectURL + Base64 for later bulk generation
       const csv = toCsv(rows);
       const blob = new Blob([csv], { type: 'text/csv' });
+      const csvUrl = window.URL.createObjectURL(blob);
+      sessionStorage.setItem('bulkFileObjectUrl', csvUrl);
+      sessionStorage.setItem('bulkFileName', 'bulk.csv');
+      const base64 = btoa(unescape(encodeURIComponent(csv)));
+      sessionStorage.setItem('bulkFileBase64', base64);
 
-      // Prefer the user's saved layout from the designer to guarantee pixel-perfect reuse
-      let layoutToUse = null;
-      try {
-        const savedStateRaw = localStorage.getItem('certificateState');
-        if (savedStateRaw) {
-          const saved = JSON.parse(savedStateRaw);
-          const { elements = {}, certificateSize = 'A4-Horizontal', borderImage = '' } = saved || {};
+      // 2) Save first row as sample certificateData
+      const sample = rows[0];
+      localStorage.setItem('certificateData', JSON.stringify({
+        name: sample['Recipient Name'] || '',
+        course: sample['Course Name'] || '',
+        date: sample['Certificate Date'] || '',
+        issuer: sample['Issuing Organization'] || '',
+        certificateTitle: sample['Certificate Title'] || '',
+        paragraph: sample['Certificate Description'] || '',
+      }));
 
-          // Build compact elements matching the backend contract
-          const compactElements = {};
-          Object.entries(elements).forEach(([key, el]) => {
-            compactElements[key] = {
-              position: el.position,
-              style: el.style,
-            };
-            const defaultBoxWidths = { title: 400, intro: 300, name: 200, paragraph: 400, course: 300, date: 200, issuer: 240 };
-            if (key !== 'qr') compactElements[key].boxWidth = defaultBoxWidths[key] || 300;
-            if (key === 'qr' && el.size) compactElements[key].size = el.size;
-          });
-
-          // Reference dimensions exactly as the preview uses
-          const dimsMap = {
-            'A4-Horizontal': { width: 800, height: 600 },
-            'A4-Vertical': { width: 600, height: 800 },
-            'A3-Horizontal': { width: 1000, height: 700 },
-            'A3-Vertical': { width: 700, height: 1000 },
-          };
-          const refDims = dimsMap[certificateSize] || dimsMap['A4-Horizontal'];
-
-          // Absolute border URL for backend to fetch
-          const borderAbsolute = /^https?:/i.test(borderImage)
-            ? borderImage
-            : `${window.location.origin}${borderImage ? (borderImage.startsWith('/') ? '' : '/') : ''}${borderImage || 'borders/Border9.png'}`;
-
-          layoutToUse = {
-            elements: compactElements,
-            borderImageUrl: borderImage,
-            borderImageUrlAbsolute: borderAbsolute,
-            referenceDimensions: refDims,
-          };
-        }
-      } catch (_) {
-        // ignore and fallback below
-      }
-
-      // Fallback strict layout if nothing saved
-      if (!layoutToUse) {
-        const refWidth = 1120;
-        const refHeight = 800;
-        layoutToUse = {
-          referenceDimensions: { width: refWidth, height: refHeight },
-          borderImageUrlAbsolute: `${window.location.origin}/borders/Border9.png`,
-          elements: {
-            title: { position: { x: 160, y: 90 }, boxWidth: 800, style: { fontSize: 36, fontWeight: '700', color: '#1e2d8b', textAlign: 'center' } },
-            intro: { position: { x: 260, y: 150 }, boxWidth: 600, style: { fontSize: 18, fontWeight: '400', color: '#475569', textAlign: 'center' } },
-            name: { position: { x: 280, y: 200 }, boxWidth: 560, style: { fontSize: 28, fontWeight: '700', color: '#2d3748', textAlign: 'center' } },
-            paragraph: { position: { x: 210, y: 250 }, boxWidth: 700, style: { fontSize: 16, fontWeight: '400', color: '#475569', textAlign: 'center' } },
-            course: { position: { x: 260, y: 308 }, boxWidth: 600, style: { fontSize: 22, fontWeight: '700', color: '#1976d2', textAlign: 'center' } },
-            date: { position: { x: 120, y: 640 }, boxWidth: 220, style: { fontSize: 14, fontWeight: '400', color: '#6b7280', textAlign: 'left' } },
-            issuer: { position: { x: 120, y: 670 }, boxWidth: 260, style: { fontSize: 14, fontWeight: '400', color: '#6b7280', textAlign: 'left' } },
-            qr: { position: { x: 880, y: 360 }, size: 140 },
-          },
-        };
-      }
-
-      const formData = new FormData();
-      formData.append('file', blob, 'bulk.csv');
-      formData.append('layout', JSON.stringify(layoutToUse));
-
-      const res = await fetch(`${apiBaseUrl}/bulk_generate`, { method: 'POST', body: formData });
-      if (!res.ok) {
-        const maybeJson = await res.json().catch(() => null);
-        throw new Error(maybeJson?.error || `Bulk generation failed with ${res.status}`);
-      }
-      const zipBlob = await res.blob();
-      const url = URL.createObjectURL(zipBlob);
-      setDownloadUrl(url);
-      setStatus('Done. Download your ZIP below.');
+      // 3) Indicate bulk mode and route to size selector first
+      sessionStorage.setItem('bulkMode', 'true');
+      navigate('/creation/size');
+      setStatus('Select a border, then preview. When you save, all certificates will generate.');
     } catch (e) {
       setError(e.message || 'Unexpected error');
     } finally {
