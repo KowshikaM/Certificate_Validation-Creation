@@ -13,6 +13,16 @@ from sqlalchemy import create_engine, Column, String, DateTime, Text
 from sqlalchemy.orm import declarative_base, sessionmaker
 import pandas as pd
 import qrcode # type: ignore # type: ignore
+from PIL import Image, ImageDraw, ImageFont
+import tempfile
+import hmac
+
+try:
+    # When running as a package (python -m backend.app)
+    from .stego_lsb import embed_message, extract_message
+except Exception:
+    # When running as a script from the backend directory (python app.py)
+    from stego_lsb import embed_message, extract_message
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader # type: ignore
 from reportlab.pdfgen import canvas # type: ignore
@@ -73,6 +83,13 @@ def compute_cert_hash(recipient_name: str, course_name: str, certificate_date: s
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
 
 
+def normalize_username(raw: str) -> str:
+    # Preserve case; trim and collapse internal whitespace to a single space
+    s = (raw or '').strip()
+    parts = s.split()
+    return ' '.join(parts)
+
+
 def generate_qr_image(verification_url: str):
     qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M,
                        box_size=8, border=2)
@@ -82,18 +99,9 @@ def generate_qr_image(verification_url: str):
     return img
 
 
-def draw_hidden_watermark(c: canvas.Canvas, page_width: float, page_height: float, watermark_text: str):
-    # Stealth watermark: draw very light grey hash characters across bottom area
-    c.saveState()
-    c.setFillGray(0.85)  # light grey
-    c.setFont("Courier", 6)
-    margin = 40
-    y = margin
-    repeated = (watermark_text + ' ')
-    text = (repeated * 50)[:400]
-    c.translate(margin, y)
-    c.drawString(0, 0, text)
-    c.restoreState()
+def draw_hidden_watermark(*args, **kwargs):
+    # Deprecated: visible/printed watermark removed as per requirements
+    return
 
 
 def _scale_position(x: float, y: float, ref_width: float, ref_height: float, target_width: float, target_height: float):
@@ -299,13 +307,237 @@ def build_certificate_pdf_bytes(data: dict, qr_img, layout: dict | None = None) 
         print(f"Error drawing fallback QR code: {e}")
         pass
 
-    # Hidden watermark using the cert hash
-    draw_hidden_watermark(c, width, height, data['cert_hash'])
+    # Visible watermark removed; no-op
 
     c.showPage()
     c.save()
     buffer.seek(0)
     return buffer.read()
+
+
+def _load_border_image_from_layout(layout: dict | None, width: int, height: int) -> Image.Image | None:
+    if not layout:
+        return None
+    border_data_url = layout.get('borderImageDataUrl') or ''
+    if isinstance(border_data_url, str) and border_data_url.startswith('data:image'):
+        try:
+            header, b64 = border_data_url.split(',', 1)
+            img_bytes = io.BytesIO(base64.b64decode(b64))
+            img = Image.open(img_bytes).convert('RGBA')
+            return img.resize((width, height), Image.LANCZOS)
+        except Exception:
+            pass
+    else:
+        border_url = layout.get('borderImageUrlAbsolute') or layout.get('borderImageUrl')
+        if border_url:
+            try:
+                resp = requests.get(border_url, timeout=10)
+                if resp.ok:
+                    img = Image.open(io.BytesIO(resp.content)).convert('RGBA')
+                    return img.resize((width, height), Image.LANCZOS)
+            except Exception:
+                pass
+    return None
+
+
+def build_certificate_png_bytes(data: dict, qr_img, layout: dict | None = None) -> bytes:
+    # Determine reference dimensions
+    ref_w = 800
+    ref_h = 600
+    if layout:
+        ref_dims = layout.get('referenceDimensions') or {'width': 800, 'height': 600}
+        try:
+            ref_w = int(float(ref_dims.get('width', 800)))
+            ref_h = int(float(ref_dims.get('height', 600)))
+        except Exception:
+            ref_w, ref_h = 800, 600
+
+    width, height = ref_w, ref_h
+
+    # Base image (RGBA for compositing)
+    base = Image.new('RGBA', (width, height), (255, 255, 255, 255))
+
+    # Background/border
+    bg = _load_border_image_from_layout(layout, width, height)
+    if bg is not None:
+        base.alpha_composite(bg)
+
+    draw = ImageDraw.Draw(base)
+
+    def _safe_font(bold: bool, size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+        # Try common fonts; fall back to default bitmap font
+        candidates = [
+            ("arialbd.ttf" if bold else "arial.ttf", size),
+            ("DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf", size),
+        ]
+        for name, sz in candidates:
+            try:
+                return ImageFont.truetype(name, sz)
+            except Exception:
+                continue
+        return ImageFont.load_default()
+
+    if layout:
+        elements = layout.get('elements') or {}
+
+        def draw_text(el_key: str, text: str, fallback=(False, 12)):
+            el = elements.get(el_key) or {}
+            pos = el.get('position') or {'x': 80, 'y': height - 160}
+            style = el.get('style') or {}
+            font_size = int(str(style.get('fontSize', fallback[1])).replace('px', '')) if isinstance(style.get('fontSize'), (str, int)) else fallback[1]
+            font_weight = str(style.get('fontWeight', 'normal')).lower()
+            color_hex = style.get('color', '#000000')
+            text_align = style.get('textAlign', 'left')
+
+            box_width = el.get('boxWidth')
+            default_box_widths = {
+                'title': 400, 'intro': 300, 'name': 200, 'paragraph': 400,
+                'course': 300, 'date': 200, 'issuer': 240
+            }
+            if not isinstance(box_width, (int, float)):
+                box_width = default_box_widths.get(el_key, 300)
+
+            try:
+                color_hex_str = str(color_hex).lstrip('#')
+                r = int(color_hex_str[0:2], 16)
+                g = int(color_hex_str[2:4], 16)
+                b = int(color_hex_str[4:6], 16)
+                color = (r, g, b, 255)
+            except Exception:
+                color = (0, 0, 0, 255)
+
+            bold = font_weight == 'bold' or font_weight == '700'
+            font = _safe_font(bold, font_size)
+
+            px = float(pos.get('x', 80))
+            py = float(pos.get('y', 80))
+            px_scaled = (px / ref_w) * width
+            py_scaled = (py / ref_h) * height
+            py_final = py_scaled  # PIL uses top-left origin
+
+            container_width_scaled = (float(box_width) / ref_w) * width
+
+            # Compute text x based on alignment
+            text_w, _ = draw.textbbox((0, 0), text, font=font)[2:4]
+            if text_align == 'center':
+                anchor_x = px_scaled + (container_width_scaled / 2)
+                text_x = anchor_x - (text_w / 2)
+            elif text_align == 'right':
+                anchor_x = px_scaled + container_width_scaled
+                text_x = anchor_x - text_w
+            else:
+                text_x = px_scaled
+
+            text_x = max(min(text_x, width - 10), 10)
+            draw.text((text_x, py_final), text, fill=color, font=font)
+
+        draw_text('title', data.get('Certificate Title') or 'Certificate of Completion', (True, 22))
+        draw_text('intro', 'This is to certify that', (False, 14))
+        draw_text('name', data.get('Recipient Name') or '', (True, 24))
+        draw_text('paragraph', data.get('Certificate Description') or '', (False, 12))
+        draw_text('course', data.get('Course Name') or '', (False, 14))
+        draw_text('date', data.get('Certificate Date') or '', (False, 12))
+        draw_text('issuer', f"Issued by: {data.get('Issuing Organization') or ''}", (False, 12))
+
+        # QR placement
+        qr_drawn = False
+        qr_el = (elements.get('qr') or elements.get('QR') or elements.get('qrcode'))
+        if qr_el:
+            qpos = qr_el.get('position') or {'x': width - 160, 'y': 60}
+            qx = float(qpos.get('x', width - 160))
+            qy = float(qpos.get('y', 60))
+            qx_scaled = int((qx / ref_w) * width)
+            qy_scaled = int((qy / ref_h) * height)
+            qr_size = int(qr_el.get('size') or 120)
+            qr_size_scaled = int((qr_size / ref_w) * width)
+
+            qr_bytes = io.BytesIO()
+            qr_img.save(qr_bytes, format='PNG')
+            qr_bytes.seek(0)
+            qr_pil = Image.open(qr_bytes).convert('RGBA').resize((qr_size_scaled, qr_size_scaled), Image.NEAREST)
+            base.alpha_composite(qr_pil, dest=(qx_scaled, qy_scaled))
+            qr_drawn = True
+        if not qr_drawn:
+            qr_size = 120
+            qr_pil = qr_img.convert('RGBA').resize((qr_size, qr_size), Image.NEAREST)
+            base.alpha_composite(qr_pil, dest=(width - qr_size - 40, height - qr_size - 40))
+    else:
+        # Simple default layout
+        title_font = _safe_font(True, 22)
+        body_font = _safe_font(False, 12)
+        draw.text((width / 2 - 180, 40), data.get('Certificate Title') or 'Certificate of Completion', fill=(0, 0, 0, 255), font=title_font)
+        draw.text((80, 100), f"Recipient: {data.get('Recipient Name')}", fill=(0, 0, 0, 255), font=body_font)
+        draw.text((80, 120), f"Course: {data.get('Course Name')}", fill=(0, 0, 0, 255), font=body_font)
+        draw.text((80, 140), f"Date: {data.get('Certificate Date')}", fill=(0, 0, 0, 255), font=body_font)
+        draw.text((80, 160), f"Issued by: {data.get('Issuing Organization')}", fill=(0, 0, 0, 255), font=body_font)
+
+        qr_pil = qr_img.convert('RGBA').resize((120, 120), Image.NEAREST)
+        base.alpha_composite(qr_pil, dest=(width - 160, height - 160))
+
+    # Export to PNG bytes (without stego)
+    out = io.BytesIO()
+    base.convert('RGB').save(out, format='PNG')
+    out.seek(0)
+    return out.read()
+
+
+@app.post('/generate_png')
+def generate_png():
+    try:
+        payload = request.get_json(silent=True) or {}
+        data = payload.get('data') or {}
+        layout = payload.get('layout')
+
+        recipient = str(data.get('Recipient Name', '')).strip()
+        course = str(data.get('Course Name', '')).strip()
+        cert_date = str(data.get('Certificate Date', '')).strip()
+        issuer = str(data.get('Issuing Organization', '')).strip()
+        title = str(data.get('Certificate Title', '')).strip()
+        desc = str(data.get('Certificate Description', '')).strip()
+
+        # Compute verification hash as before to create QR code URL
+        cert_hash = compute_cert_hash(recipient, course, cert_date, issuer)
+        verify_url = f"{PUBLIC_VERIFY_BASE}?cert_id={cert_hash}"
+        qr_img = generate_qr_image(verify_url)
+
+        # Build base PNG bytes
+        png_bytes = build_certificate_png_bytes({
+            'Recipient Name': recipient,
+            'Course Name': course,
+            'Certificate Date': cert_date,
+            'Issuing Organization': issuer,
+            'Certificate Title': title,
+            'Certificate Description': desc,
+        }, qr_img, layout)
+
+        # Compute SHA-256 of normalized username (recipient name)
+        username_string = normalize_username(recipient)
+        sha = hashlib.sha256(username_string.encode('utf-8')).hexdigest()
+
+        # Write to temp, embed stego, return
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_in:
+            tmp_in.write(png_bytes)
+            tmp_in.flush()
+            in_path = tmp_in.name
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_out:
+            out_path = tmp_out.name
+        try:
+            embed_message(in_path, out_path, sha)
+            with open(out_path, 'rb') as f:
+                final_png = f.read()
+        finally:
+            try:
+                os.remove(in_path)
+            except Exception:
+                pass
+            try:
+                os.remove(out_path)
+            except Exception:
+                pass
+
+        return send_file(io.BytesIO(final_png), mimetype='image/png', as_attachment=True, download_name='certificate.png')
+    except Exception as e:
+        return jsonify({"error": f"Failed to generate PNG: {str(e)}"}), 500
 
 
 @app.post('/bulk_generate')
@@ -416,15 +648,38 @@ def bulk_generate():
                 verify_url = f"{PUBLIC_VERIFY_BASE}?cert_id={cert_hash}"
                 qr_img = generate_qr_image(verify_url)
 
-                pdf_bytes = build_certificate_pdf_bytes({
+                # Build PNG and embed steganographic username hash
+                png_bytes = build_certificate_png_bytes({
                     'Recipient Name': recipient,
                     'Course Name': course,
                     'Certificate Date': cert_date,
                     'Issuing Organization': issuer,
                     'Certificate Title': title,
                     'Certificate Description': desc,
-                    'cert_hash': cert_hash,
                 }, qr_img, layout)
+
+                username_string = normalize_username(recipient)
+                sha = hashlib.sha256(username_string.encode('utf-8')).hexdigest()
+
+                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_in:
+                    tmp_in.write(png_bytes)
+                    tmp_in.flush()
+                    in_path = tmp_in.name
+                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_out:
+                    out_path = tmp_out.name
+                try:
+                    embed_message(in_path, out_path, sha)
+                    with open(out_path, 'rb') as f:
+                        final_png = f.read()
+                finally:
+                    try:
+                        os.remove(in_path)
+                    except Exception:
+                        pass
+                    try:
+                        os.remove(out_path)
+                    except Exception:
+                        pass
 
                 # Debug: Check if layout was used for this certificate
                 if idx == 0:  # Only print for first certificate to avoid spam
@@ -436,8 +691,8 @@ def bulk_generate():
                         print(f"Layout dimensions: {layout.get('referenceDimensions')}")
                     print(f"=== END SUMMARY ===")
 
-                pdf_name = f"certificate_{idx + 1}.pdf"
-                zf.writestr(pdf_name, pdf_bytes)
+                png_name = f"certificate_{idx + 1}.png"
+                zf.writestr(png_name, final_png)
                 created += 1
 
             session.commit()
@@ -556,6 +811,53 @@ def verify():
         return render_template_string(VERIFY_TEMPLATE, cert=cert, cert_id=cert_id), (200 if cert else 404)
     finally:
         session.close()
+
+
+@app.post('/verify')
+def verify_png():
+    # Stego verification for uploaded PNG and username
+    if 'file' not in request.files:
+        return jsonify({"status": "error", "valid": False, "reason": "no_file"}), 400
+    file = request.files['file']
+    username = normalize_username(request.form.get('username') or '')
+    if not username:
+        return jsonify({"status": "error", "valid": False, "reason": "missing_username"}), 400
+    if not file.filename.lower().endswith('.png'):
+        return jsonify({"status": "error", "valid": False, "reason": "invalid_file_type"}), 400
+
+    try:
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+            file.save(tmp)
+            tmp.flush()
+            path = tmp.name
+        try:
+            extracted = extract_message(path)
+        finally:
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+    except Exception:
+        return jsonify({"status": "error", "valid": False, "reason": "no_embedded_hash"}), 200
+
+    extracted_hex = (extracted or '').strip().lower()
+    # Validate payload looks like a SHA-256 hex (64 hex chars)
+    if len(extracted_hex) != 64 or any(c not in '0123456789abcdef' for c in extracted_hex):
+        return jsonify({"status": "error", "valid": False, "reason": "no_embedded_hash"}), 200
+    expected_hex = hashlib.sha256(username.encode('utf-8')).hexdigest()
+    is_match = hmac.compare_digest(extracted_hex, expected_hex)
+
+    resp = {
+        "status": "success",
+        "valid": bool(is_match),
+        "method": "stego",
+        "extracted_hash": extracted_hex,
+        "expected_hash": expected_hex,
+        "normalized_username": username,
+    }
+    if not is_match:
+        resp["reason"] = "name_mismatch"
+    return jsonify(resp)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', '5000'))

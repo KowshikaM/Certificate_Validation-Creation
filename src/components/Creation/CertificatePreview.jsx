@@ -592,39 +592,83 @@ ${qrData.verificationNote}`;
   const handleDownload = async () => {
     setIsGenerating(true);
     try {
-      if (certificateRef.current) {
-        // Show watermark - it will generate hash and pattern automatically
-        setShowWatermark(true);
-        
-        // Wait for watermark to be generated and rendered
-        await new Promise((resolve) => setTimeout(resolve, 200));
-        
-        // Capture the certificate with watermark
-        const canvas = await html2canvas(certificateRef.current, {
-          useCORS: true,
-          backgroundColor: null,
-          scale: 2,
-        });
-        
-        // Remove watermark from DOM immediately after capture
-        setShowWatermark(false);
-        setWatermarkHash('');
-        setWatermarkPattern('');
-        
-        // Download the image
-        const link = document.createElement('a');
-        link.download = `certificate_${Date.now()}.png`;
-        link.href = canvas.toDataURL();
-        link.click();
+      // Build compact layout similar to bulk path
+      const compactElements = {};
+      Object.entries(elements).forEach(([key, el]) => {
+        compactElements[key] = {
+          position: el.position,
+          style: el.style,
+        };
+        const defaultBoxWidths = {
+          title: 400, intro: 300, name: 200, paragraph: 400, course: 300, date: 200, issuer: 240,
+        };
+        if (key !== 'qr') {
+          compactElements[key].boxWidth = defaultBoxWidths[key] || 300;
+        }
+        if (key === 'qr' && el.size) {
+          compactElements[key].size = el.size;
+        }
+      });
+
+      const borderSrc = localStorage.getItem('certificateBorder') || '';
+      let borderAbsolute = '';
+      if (borderSrc) {
+        borderAbsolute = /^https?:/i.test(borderSrc)
+          ? borderSrc
+          : `${window.location.origin}${borderSrc.startsWith('/') ? '' : '/'}${borderSrc}`;
       }
+
+      const layout = {
+        elements: compactElements,
+        borderImageUrl: borderSrc,
+        borderImageUrlAbsolute: borderAbsolute,
+        referenceDimensions: getCertificateDimensions(certificateSize),
+      };
+
+      // Extract plain values for data
+      const extractText = (val) => String(val || '').replace(/<[^>]*>/g, '');
+      const nameText = extractText(elements.name?.text);
+      const courseText = extractText(elements.course?.text);
+      const dateText = extractText(elements.date?.text).replace(/^on\s*/i, '');
+      const issuerText = extractText(elements.issuer?.text).replace(/^Issued by:\s*/i, '');
+      const titleText = extractText(elements.title?.text);
+      const descText = extractText(elements.paragraph?.text);
+
+      const payload = {
+        data: {
+          'Recipient Name': nameText,
+          'Course Name': courseText,
+          'Certificate Date': dateText,
+          'Issuing Organization': issuerText,
+          'Certificate Title': titleText,
+          'Certificate Description': descText,
+        },
+        layout,
+      };
+
+      const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || 'http://127.0.0.1:5000';
+      const res = await fetch(`${apiBaseUrl}/generate_png`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Generation failed: ${text}`);
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `certificate_${Date.now()}.png`;
+      a.click();
+      window.URL.revokeObjectURL(url);
     } catch (error) {
-      console.error('Error capturing certificate:', error);
-      // Ensure watermark is removed even if error occurs
-      setShowWatermark(false);
-      setWatermarkHash('');
-      setWatermarkPattern('');
+      console.error('Error generating certificate PNG:', error);
+      alert('Failed to generate PNG from backend. Is the server running?');
+    } finally {
+      setIsGenerating(false);
     }
-    setIsGenerating(false);
   };
 
   if (!certificateData) {

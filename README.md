@@ -113,3 +113,24 @@ src/components/Creation/
 ## License
 
 This project is licensed under the ISC License. 
+
+## Steganographic SHA embedding (PNG certificates)
+
+When generating a PNG certificate via the backend endpoint `/generate_png`, the server computes `sha256(username_string).hexdigest()` (lowercase hex; we use the recipient name as `username_string`). This SHA string is embedded into the resulting PNG using least significant bit (LSB) steganography:
+
+- A 32-bit big-endian length header precedes the payload
+- The payload is the ASCII bytes of the SHA hex string
+- We use 1 bit from each R, G, B channel in raster order (3 bits per pixel)
+- The image is saved losslessly as PNG so the embedded bits are preserved
+
+Utility functions live in `backend/stego_lsb.py`:
+
+- `embed_message(input_png_path, output_png_path, message: str)`
+- `extract_message(input_png_path) -> str`
+
+To test extraction locally:
+
+```python
+from backend.stego_lsb import extract_message
+print(extract_message('path/to/certificate.png'))
+```
